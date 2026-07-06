@@ -4,11 +4,15 @@ No webcam needed: the LBPH pipeline (load data -> train -> save model ->
 load model -> predict) is exercised on deterministic generated textures.
 """
 
+import shutil
+
 import cv2
 import numpy as np
 import pytest
 
+import evaluate
 import recognize
+import register
 import train
 
 from conftest import make_face
@@ -63,9 +67,9 @@ def test_trained_model_recognizes_training_faces(faces_dataset):
     recognizer = recognize.load_recognizer()
 
     for student_id in (1, 2):
-        sample = cv2.imread(
+        sample = recognize.preprocess(cv2.imread(
             str(faces_dataset["faces_dir"] / str(student_id) / "000.png"),
-            cv2.IMREAD_GRAYSCALE)
+            cv2.IMREAD_GRAYSCALE))
         label, confidence = recognizer.predict(sample)
         assert label == student_id
         assert confidence <= recognize.THRESHOLD, (
@@ -77,10 +81,10 @@ def test_unknown_face_scores_worse_than_known(faces_dataset):
     train.train()
     recognizer = recognize.load_recognizer()
 
-    known = cv2.imread(
+    known = recognize.preprocess(cv2.imread(
         str(faces_dataset["faces_dir"] / "1" / "000.png"),
-        cv2.IMREAD_GRAYSCALE)
-    stranger = make_face(seed=999999)  # texture never seen in training
+        cv2.IMREAD_GRAYSCALE))
+    stranger = recognize.preprocess(make_face(seed=999999))  # unseen texture
 
     _, known_conf = recognizer.predict(known)
     _, stranger_conf = recognizer.predict(stranger)
@@ -97,6 +101,64 @@ def test_load_recognizer_without_model_raises_runtime_error(
         recognize.load_recognizer()
 
 
+def test_match_existing_student_flags_same_face(db, faces_dataset, tmp_path):
+    """Duplicate-registration check: samples copied from an already
+    registered face must be flagged as that student."""
+    db.add_student("Alice", "R1", "CS101")   # student_id 1
+    db.add_student("Bob", "R2", "CS101")     # student_id 2
+    train.train()
+
+    new_capture = tmp_path / "new_capture"
+    new_capture.mkdir()
+    for p in (faces_dataset["faces_dir"] / "1").glob("*.png"):
+        shutil.copy(p, new_capture / p.name)
+
+    match = recognize.match_existing_student(new_capture)
+    assert match is not None
+    student, fraction, mean_conf = match
+    assert student["student_id"] == 1
+    assert fraction >= 0.5
+    assert mean_conf <= recognize.DUPLICATE_THRESHOLD
+
+
+def test_match_existing_student_passes_new_face(db, faces_dataset, tmp_path):
+    db.add_student("Alice", "R1", "CS101")
+    db.add_student("Bob", "R2", "CS101")
+    train.train()
+
+    new_capture = tmp_path / "new_capture"
+    new_capture.mkdir()
+    # A structurally different image: to LBPH, two random-noise textures
+    # look alike, so blur heavily to change the texture statistics.
+    stranger = cv2.GaussianBlur(make_face(seed=555000), (31, 31), 0)
+    for i in range(10):
+        cv2.imwrite(str(new_capture / f"{i:03d}.png"), stranger)
+
+    assert recognize.match_existing_student(new_capture) is None
+
+
+def test_match_existing_student_without_model_returns_none(
+        tmp_path, monkeypatch):
+    monkeypatch.setattr(recognize, "MODEL_PATH", tmp_path / "missing.yml")
+    assert recognize.match_existing_student(tmp_path) is None
+
+
+def test_evaluate_reports_error_rates(db, faces_dataset, tmp_path, monkeypatch):
+    """evaluate.py must produce sane metrics and append a log row."""
+    monkeypatch.setattr(evaluate, "LOG_PATH", tmp_path / "evaluation_log.csv")
+    db.add_student("Alice", "R1", "CS101")   # student_id 1
+    db.add_student("Bob", "R2", "CS101")     # student_id 2
+
+    result = evaluate.evaluate()
+
+    # Synthetic textures are highly distinctive: held-out samples of a
+    # registered student must be recognized correctly.
+    assert result["accuracy"] >= 0.9
+    assert 0.0 <= result["frr"] <= 1.0
+    assert 0.0 <= result["far"] <= 1.0
+    assert (tmp_path / "evaluation_log.csv").exists()
+
+
 @pytest.mark.parametrize("registered, session, expected", [
     ("CS101", "CS101", True),
     ("CS101", "cs101", True),          # case-insensitive
@@ -111,6 +173,14 @@ def test_is_enrolled_matches_case_insensitive_trimmed(
     single registered course field."""
     student = {"course": registered}
     assert recognize.is_enrolled(student, session) is expected
+
+
+def test_detect_cameras_returns_index_list():
+    """Environment-agnostic: a machine with no camera returns []; the shape
+    of the result is what the GUI's camera picker relies on."""
+    found = register.detect_cameras(max_devices=1)
+    assert isinstance(found, list)
+    assert all(isinstance(i, int) for i in found)
 
 
 def test_haar_cascade_is_available():

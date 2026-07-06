@@ -37,9 +37,15 @@ Operation is split into two phases:
 ## Features
 
 - **Student registration** — personal details (name, registration number,
-  course) plus 30 webcam face samples per student. Registration numbers
-  are unique (enforced by a database constraint, with a friendly error
-  dialog on duplicates).
+  course) plus 30 webcam face samples per student, spaced ~200 ms apart
+  (after a short camera warm-up) so the model learns pose variety rather
+  than 30 copies of one frame. Registration numbers are unique (enforced
+  by a database constraint, with a friendly error dialog on duplicates).
+- **Duplicate-face check** — after capture, the new samples are compared
+  against the existing model; if most of them strongly match an
+  already-registered student, the lecturer is warned that the same person
+  may be enrolling under a second registration number and can cancel the
+  registration.
 - **Automatic model training** — the LBPH recognizer is retrained after
   every registration and de-registration.
 - **Live attendance sessions** — the lecturer enters the course name and
@@ -63,6 +69,11 @@ Operation is split into two phases:
   marked inactive, their face images are deleted, and the model is
   retrained. Their attendance history is deliberately preserved so past
   reports remain accurate.
+- **External camera support** — any camera OpenCV can open works as the
+  video source: the built-in webcam, a USB webcam, or a phone used as a
+  camera. A "Detect cameras" button scans for connected devices and the
+  lecturer picks one from a dropdown (shared by registration and
+  sessions), so the system is not tied to the laptop's own camera.
 - **Error handling** — friendly dialogs (no crashes) when a session is
   started before any student is registered, when a registration number is
   already taken, or when the webcam is unavailable or in use. If the
@@ -81,6 +92,14 @@ may be further from the camera.
 describes each face as a histogram of local texture patterns and compares
 histograms between the detected face and the training data.
 
+**Preprocessing**: every face crop is histogram-equalized
+(`cv2.equalizeHist`) before both training and prediction. LBPH is
+sensitive to overall brightness, so without this step the model tends to
+match on lighting conditions instead of facial features — typically
+predicting whichever student was registered most recently, since their
+samples best match the current camera exposure. Equalization normalizes
+the lighting so the comparison is about the face.
+
 **The confidence score is a distance: lower means a better match.** A
 detected face is accepted as a registered student only when its confidence
 is at or below the threshold (`THRESHOLD` in `recognize.py`, default 65);
@@ -94,8 +113,12 @@ To make tuning evidence-based rather than guesswork, every prediction is
 logged to the console as:
 
 ```text
-[predict] label=<student_id> confidence=<value> -> ACCEPT/REJECT
+[predict] label=<student_id> confidence=<value> -> ACCEPT/REJECT/NOT_ENROLLED
 ```
+
+and appended to `data/predictions_log.csv` with a timestamp and the
+session course, so error rates during real sessions can be analyzed after
+the fact.
 
 A known limitation of LBPH: with only one registered student the model has
 no negative examples, so rejection of strangers is unreliable. Rejection
@@ -186,6 +209,23 @@ tabs:
 3. **View Attendance** — filter records by date and/or course, and export
    the current view to CSV.
 
+### Using an external camera (USB webcam or phone)
+
+Both webcam tabs have a **Camera device** dropdown with a **Detect
+cameras** button:
+
+- **USB webcam** — plug it in, click Detect cameras, and pick its number
+  (device 0 is usually the built-in webcam; the USB camera appears as 1
+  or higher).
+- **Phone as camera** — install a webcam app such as DroidCam or Iriun
+  (phone app + free Windows client), connect via USB cable or Wi-Fi, and
+  the phone shows up as an extra camera device; click Detect cameras and
+  select it. Phone cameras are usually sharper than laptop webcams, which
+  helps recognition accuracy.
+
+The standalone scripts ask for the camera index on start; the default
+(Enter) is device 0.
+
 The underlying scripts also run standalone, which is useful for testing
 and debugging: `python register.py`, `python train.py`,
 `python recognize.py`.
@@ -198,6 +238,7 @@ database.py       SQLite schema and queries
 register.py       Face sample capture (enrollment)
 train.py          LBPH model training
 recognize.py      Live recognition and attendance marking
+evaluate.py       Offline error-rate measurement (accuracy, FRR, FAR)
 tests/            Automated unit tests (pytest)
 requirements.txt  Dependencies
 data/             Runtime data: face images, database, trained model
@@ -216,6 +257,25 @@ predict) using synthetic face images, so no webcam is needed:
 ```bash
 python -m pytest tests -v
 ```
+
+### Error-rate measurement (no webcam needed)
+
+`evaluate.py` measures the recognizer on the face samples already saved
+under `data/faces/`: it holds out 20% of each student's images, trains on
+the rest, and reports per-student accuracy, false rejections (FRR) and
+misidentifications; it then estimates the False Acceptance Rate (FAR) by
+predicting each student against a model trained without them. It also
+prints the genuine vs impostor confidence ranges and a suggested
+`THRESHOLD`.
+
+```bash
+python evaluate.py
+```
+
+Each run appends a summary row to `data/evaluation_log.csv`, so error
+rates can be compared across changes (recaptured samples, threshold
+adjustments, more students) — this is the quantitative evidence for the
+project report.
 
 ### Acceptance tests (manual, with webcam)
 
@@ -253,8 +313,11 @@ with the measurements above that justify it.
 
 ## Troubleshooting
 
-- **"Cannot open webcam"** — another application is using the camera, or
-  change `camera_index=0` to `1` in `register.py` / `recognize.py`.
+- **"Cannot open camera"** — another application is using the camera;
+  close it, or click **Detect cameras** and select a different device.
+- **Phone doesn't appear as a camera** — make sure the webcam app is
+  running on the phone *and* its Windows client is installed and
+  connected, then click Detect cameras again.
 - **`cv2.face` AttributeError** — plain opencv-python is installed instead
   of opencv-contrib-python; see Setup.
 - **Poor recognition** — recapture samples in better lighting and make

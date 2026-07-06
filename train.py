@@ -28,7 +28,8 @@ def load_training_data():
         for img_path in student_dir.glob("*.png"):
             img = cv2.imread(str(img_path), cv2.IMREAD_GRAYSCALE)
             if img is not None:
-                images.append(img)
+                # Equalize lighting; must match recognize.preprocess().
+                images.append(cv2.equalizeHist(img))
                 labels.append(label)
     return images, labels
 

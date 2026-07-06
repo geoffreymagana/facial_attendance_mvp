@@ -26,8 +26,15 @@ class AttendanceApp(tk.Tk):
     def __init__(self):
         super().__init__()
         self.title("Facial Recognition Class Attendance System")
-        self.geometry("760x520")
+        self.geometry("760x560")
         database.init_db()
+
+        # Camera device shared by registration and sessions: 0 is usually
+        # the built-in webcam; a USB webcam or a phone running a webcam
+        # app appears as a higher index. "Detect cameras" fills the list.
+        self.var_camera = tk.StringVar(value="0")
+        self.camera_choices = ["0"]
+        self._camera_boxes = []
 
         notebook = ttk.Notebook(self)
         notebook.pack(fill="both", expand=True, padx=8, pady=8)
@@ -65,27 +72,78 @@ class AttendanceApp(tk.Tk):
             ttk.Entry(frame, textvariable=var, width=34).grid(
                 row=i, column=1, sticky="w", **pad)
 
+        self._build_camera_row(frame).grid(row=4, column=0, columnspan=2, **pad)
+
         self.btn_capture = ttk.Button(
             frame, text="Register + Capture Faces (webcam)",
             command=self.on_register)
-        self.btn_capture.grid(row=4, column=0, columnspan=2, **pad)
+        self.btn_capture.grid(row=5, column=0, columnspan=2, **pad)
 
         self.lbl_reg_status = ttk.Label(frame, text="", foreground="green")
-        self.lbl_reg_status.grid(row=5, column=0, columnspan=2, **pad)
+        self.lbl_reg_status.grid(row=6, column=0, columnspan=2, **pad)
 
         ttk.Separator(frame, orient="horizontal").grid(
-            row=6, column=0, columnspan=2, sticky="ew", padx=10, pady=10)
+            row=7, column=0, columnspan=2, sticky="ew", padx=10, pady=10)
 
         ttk.Label(frame, text="Registered students:").grid(
-            row=7, column=0, columnspan=2, sticky="w", padx=10)
+            row=8, column=0, columnspan=2, sticky="w", padx=10)
         self.students_list = tk.Listbox(frame, width=70, height=8)
-        self.students_list.grid(row=8, column=0, columnspan=2, padx=10, pady=4)
+        self.students_list.grid(row=9, column=0, columnspan=2, padx=10, pady=4)
 
         self.btn_deregister = ttk.Button(
             frame, text="De-register Selected", command=self.on_deregister)
-        self.btn_deregister.grid(row=9, column=0, columnspan=2, **pad)
+        self.btn_deregister.grid(row=10, column=0, columnspan=2, **pad)
 
         self.refresh_students()
+
+    # ---------------- Camera selection ----------------
+    def _build_camera_row(self, parent):
+        """Camera picker; one shared variable, so the selection made on one
+        tab follows the user to the other."""
+        row = ttk.Frame(parent)
+        ttk.Label(row, text="Camera device:").pack(side="left", padx=6)
+        box = ttk.Combobox(row, textvariable=self.var_camera, width=4,
+                           values=self.camera_choices, state="readonly")
+        box.pack(side="left")
+        ttk.Button(row, text="Detect cameras",
+                   command=self.on_detect_cameras).pack(side="left", padx=8)
+        self._camera_boxes.append(box)
+        return row
+
+    def _camera_index(self):
+        try:
+            return int(self.var_camera.get())
+        except ValueError:
+            return 0
+
+    def on_detect_cameras(self):
+        self._set_busy(True)
+
+        def work():
+            found = register.detect_cameras()
+            self.after(0, lambda: self._cameras_detected(found))
+
+        threading.Thread(target=work, daemon=True).start()
+
+    def _cameras_detected(self, found):
+        self._set_busy(False)
+        if not found:
+            messagebox.showerror(
+                "No camera found",
+                "No working camera detected. Plug in a USB webcam, or start "
+                "the webcam app on your phone (e.g. DroidCam or Iriun), "
+                "then click Detect cameras again.")
+            return
+        self.camera_choices = [str(i) for i in found]
+        for box in self._camera_boxes:
+            box.config(values=self.camera_choices)
+        if self.var_camera.get() not in self.camera_choices:
+            self.var_camera.set(self.camera_choices[0])
+        messagebox.showinfo(
+            "Cameras detected",
+            f"Found camera device(s): {', '.join(self.camera_choices)}.\n\n"
+            f"Device 0 is usually the built-in webcam; higher numbers are "
+            f"USB webcams or phone cameras. Pick one in the dropdown.")
 
     def refresh_students(self):
         self.students_list.delete(0, tk.END)
@@ -113,12 +171,21 @@ class AttendanceApp(tk.Tk):
 
         self._set_busy(True)
         self.lbl_reg_status.config(text="Capturing faces... look at the camera.")
+        camera_index = self._camera_index()
 
         def work():
             student_id = None
             try:
                 student_id = database.add_student(name, regno, course)
-                count = register.capture_faces(student_id)
+                count = register.capture_faces(student_id,
+                                               camera_index=camera_index)
+                face_dir = Path(__file__).parent / "data" / "faces" / str(student_id)
+                dup = recognize.match_existing_student(face_dir,
+                                                       exclude_id=student_id)
+                if dup:
+                    self.after(0, lambda: self._confirm_duplicate_face(
+                        student_id, name, count, dup))
+                    return
                 train.train()
                 self.after(0, lambda: self._register_done(name, count))
             except sqlite3.IntegrityError:
@@ -156,6 +223,36 @@ class AttendanceApp(tk.Tk):
         self._set_busy(False)
         self.refresh_students()
         messagebox.showerror(title, msg)
+
+    def _confirm_duplicate_face(self, student_id, name, count, dup):
+        """The captured face matched an already-registered student; let the
+        lecturer decide (e.g. twins) or cancel the duplicate registration."""
+        existing, fraction, mean_conf = dup
+        keep = messagebox.askyesno(
+            "Possible duplicate face",
+            f"The captured face matches already-registered student "
+            f"{existing['name']} ({existing['registration_no']}) on "
+            f"{fraction:.0%} of samples (mean confidence {mean_conf:.0f}).\n\n"
+            f"The same person may be registering under a second registration "
+            f"number.\n\nRegister '{name}' anyway?")
+        if keep:
+            def finish():
+                try:
+                    train.train()
+                    self.after(0, lambda: self._register_done(name, count))
+                except Exception as e:
+                    self.after(0, lambda: self._register_failed(
+                        "Training failed", str(e)))
+            threading.Thread(target=finish, daemon=True).start()
+            return
+
+        shutil.rmtree(Path(__file__).parent / "data" / "faces" / str(student_id),
+                      ignore_errors=True)
+        database.remove_student_if_no_attendance(student_id)
+        self.lbl_reg_status.config(
+            text=f"Registration of {name} cancelled (duplicate face).")
+        self._set_busy(False)
+        self.refresh_students()
 
     def on_deregister(self):
         sel = self.students_list.curselection()
@@ -208,6 +305,8 @@ class AttendanceApp(tk.Tk):
         self.var_session = tk.StringVar(value="CS101")
         ttk.Entry(row, textvariable=self.var_session, width=20).pack(side="left")
 
+        self._build_camera_row(frame).pack(**pad)
+
         self.btn_session = ttk.Button(frame, text="Start Camera Session",
                                       command=self.on_session)
         self.btn_session.pack(**pad)
@@ -226,11 +325,12 @@ class AttendanceApp(tk.Tk):
             return
 
         course = self.var_session.get().strip() or "GENERAL"
+        camera_index = self._camera_index()
         self._set_busy(True)
 
         def work():
             try:
-                recognize.run_session(course)
+                recognize.run_session(course, camera_index=camera_index)
             except Exception as e:
                 self.after(0, lambda: messagebox.showerror("Session error", str(e)))
             self.after(0, lambda: self._set_busy(False))
