@@ -1,9 +1,13 @@
 """Facial Recognition Class Attendance System - Tkinter GUI.
 
-Three screens in one window:
-  1. Register Student  (details + face capture + retrain)
-  2. Start Session     (live recognition)
-  3. View Attendance   (filter by date/course, export CSV)
+A single window with a sidebar navigation and three pages:
+  1. Register    (student details + face capture + retrain)
+  2. Session     (live recognition)
+  3. Attendance  (filter by date/course, export CSV)
+
+The look is defined in theme.py (palette, fonts, ttk styles). Structural
+containers use plain tk widgets for precise colour control; interactive
+widgets are ttk and themed centrally.
 
 Run:  python app.py
 """
@@ -21,14 +25,19 @@ import database
 import register
 import train
 import recognize
+import theme
+from theme import PALETTE as C, FONTS as F
 
 
 class AttendanceApp(tk.Tk):
     def __init__(self):
         super().__init__()
         self.title("Facial Recognition Class Attendance System")
-        self.geometry("760x560")
+        self.geometry("1040x720")
+        self.minsize(940, 640)
         database.init_db()
+        theme.apply_styles(self)
+        self.configure(bg=C["bg"])
 
         # Camera device shared by registration and sessions: 0 is usually
         # the built-in webcam; a USB webcam or a phone running a webcam
@@ -44,51 +53,150 @@ class AttendanceApp(tk.Tk):
         self.camera_ready = cv_engine.available()
         self._camera_buttons = []
 
-        self.notebook = ttk.Notebook(self)
-        self.notebook.pack(fill="both", expand=True, padx=8, pady=8)
+        self._active_page = None
+        self.nav_buttons = {}
+        self.engine_pill = None
 
-        self.tab_register = ttk.Frame(self.notebook)
-        self.tab_session = ttk.Frame(self.notebook)
-        self.tab_view = ttk.Frame(self.notebook)
-        self.notebook.add(self.tab_register, text="  Register Student  ")
-        self.notebook.add(self.tab_session, text="  Start Session  ")
-        self.notebook.add(self.tab_view, text="  View Attendance  ")
+        main = tk.Frame(self, bg=C["bg"])
+        main.pack(fill="both", expand=True)
+        self._build_sidebar(main)
 
-        self._build_register_tab()
-        self._build_session_tab()
-        self._build_view_tab()
+        self.content = tk.Frame(main, bg=C["bg"])
+        self.content.pack(side="left", fill="both", expand=True)
 
-        # Banner sits above the notebook; built last so self.notebook exists.
+        self.pages_container = tk.Frame(self.content, bg=C["bg"])
+        self.pages_container.pack(fill="both", expand=True)
+        self.pages = {
+            "register": tk.Frame(self.pages_container, bg=C["bg"]),
+            "session": tk.Frame(self.pages_container, bg=C["bg"]),
+            "view": tk.Frame(self.pages_container, bg=C["bg"]),
+        }
+
+        self._build_register_page()
+        self._build_session_page()
+        self._build_view_page()
+
+        # Banner lives in the content column, above the pages.
         self._build_banner()
 
+        self._show_page("register")
         # Reflect the initial engine state onto the camera-dependent buttons.
         self._set_busy(False)
 
-    # ---------------- Camera-engine banner ----------------
+    # ================= Layout scaffolding =================
+    def _build_sidebar(self, parent):
+        bar = tk.Frame(parent, bg=C["sidebar"], width=248)
+        bar.pack(side="left", fill="y")
+        bar.pack_propagate(False)
+
+        brand = tk.Frame(bar, bg=C["sidebar"])
+        brand.pack(fill="x", padx=20, pady=(24, 20))
+        tk.Label(brand, text="\U0001F393  Attendance", bg=C["sidebar"],
+                 fg="#ffffff", font=F["brand"]).pack(anchor="w")
+        tk.Label(brand, text="Facial Recognition", bg=C["sidebar"],
+                 fg=C["sidebar_muted"], font=F["small"]).pack(anchor="w")
+
+        nav = tk.Frame(bar, bg=C["sidebar"])
+        nav.pack(fill="x", pady=(4, 0))
+        self._nav_button(nav, "register", "Register", "\U0001F9D1")
+        self._nav_button(nav, "session", "Session", "\U0001F3A5")
+        self._nav_button(nav, "view", "Attendance", "\U0001F4CA")
+
+        footer = tk.Frame(bar, bg=C["sidebar"])
+        footer.pack(side="bottom", fill="x", padx=20, pady=20)
+        self.engine_pill = tk.Label(footer, bg=C["sidebar"], anchor="w",
+                                    font=F["small_bold"])
+        self.engine_pill.pack(anchor="w")
+        self._update_engine_pill()
+
+    def _nav_button(self, parent, name, label, icon):
+        btn = tk.Button(
+            parent, text=f"   {icon}    {label}", anchor="w", font=F["nav"],
+            bd=0, relief="flat", cursor="hand2", highlightthickness=0,
+            bg=C["sidebar"], fg=C["sidebar_text"],
+            activebackground=C["sidebar_active"], activeforeground="#ffffff",
+            padx=14, pady=11, command=lambda: self._show_page(name))
+        btn.pack(fill="x", padx=12, pady=3)
+        btn.bind("<Enter>", lambda e: btn.config(
+            bg=C["sidebar_hover"]) if self._active_page != name else None)
+        btn.bind("<Leave>", lambda e: btn.config(
+            bg=C["sidebar_active"] if self._active_page == name else C["sidebar"]))
+        self.nav_buttons[name] = btn
+
+    def _show_page(self, name):
+        for frame in self.pages.values():
+            frame.pack_forget()
+        self.pages[name].pack(fill="both", expand=True)
+        self._active_page = name
+        for n, btn in self.nav_buttons.items():
+            if n == name:
+                btn.config(bg=C["sidebar_active"], fg="#ffffff")
+            else:
+                btn.config(bg=C["sidebar"], fg=C["sidebar_text"])
+
+    def _card(self, parent):
+        """A white panel with a hairline border. Returns (outer, inner);
+        pack/grid the outer, put content in the padded inner."""
+        outer = tk.Frame(parent, bg=C["surface"], bd=0,
+                         highlightbackground=C["border"],
+                         highlightcolor=C["border"], highlightthickness=1)
+        inner = tk.Frame(outer, bg=C["surface"])
+        inner.pack(fill="both", expand=True, padx=20, pady=18)
+        return outer, inner
+
+    def _page_header(self, parent, title, subtitle):
+        head = tk.Frame(parent, bg=C["bg"])
+        tk.Label(head, text=title, bg=C["bg"], fg=C["text"],
+                 font=F["title"]).pack(anchor="w")
+        tk.Label(head, text=subtitle, bg=C["bg"], fg=C["muted"],
+                 font=F["body"]).pack(anchor="w", pady=(3, 0))
+        return head
+
+    def _field(self, parent, label, var, width=32):
+        wrap = tk.Frame(parent, bg=C["surface"])
+        tk.Label(wrap, text=label, bg=C["surface"], fg=C["muted"],
+                 font=F["small_bold"]).pack(anchor="w")
+        ttk.Entry(wrap, textvariable=var, width=width).pack(
+            anchor="w", fill="x", pady=(4, 0))
+        return wrap
+
+    # ================= Camera-engine banner / status =================
     def _build_banner(self):
-        """A red strip shown only when OpenCV failed to load. It explains why
+        """A strip shown only when OpenCV failed to load. It explains why
         camera features are off and offers a retry, so a DLL/runtime problem
         degrades the app instead of preventing it from opening."""
-        self.banner = tk.Frame(self, bg="#8a1f1f")
-        self.banner_label = tk.Label(
-            self.banner, bg="#8a1f1f", fg="white", justify="left",
-            anchor="w", padx=10, pady=6)
+        self.banner = tk.Frame(self.content, bg=C["warn_bg"])
+        inner = tk.Frame(self.banner, bg=C["warn_bg"])
+        inner.pack(fill="x", padx=18, pady=9)
+        self.banner_label = tk.Label(inner, bg=C["warn_bg"], fg="#ffffff",
+                                     justify="left", anchor="w", font=F["small"])
         self.banner_label.pack(side="left", fill="x", expand=True)
-        tk.Button(self.banner, text="Retry camera engine",
-                  command=self.on_retry_engine).pack(side="right", padx=8, pady=4)
+        tk.Button(inner, text="Retry camera engine", command=self.on_retry_engine,
+                  bg="#ffffff", fg=C["warn_bg"], bd=0, relief="flat",
+                  cursor="hand2", activebackground="#f1f5f9",
+                  activeforeground=C["warn_bg"], font=F["small_bold"],
+                  padx=12, pady=5).pack(side="right")
         self._update_banner()
 
+    def _update_engine_pill(self):
+        if self.engine_pill is None:
+            return
+        if self.camera_ready:
+            self.engine_pill.config(text="●  Camera ready", fg=C["pill_ok"])
+        else:
+            self.engine_pill.config(text="●  Camera off", fg=C["pill_off"])
+
     def _update_banner(self):
+        self._update_engine_pill()
         if self.camera_ready:
             self.banner.pack_forget()
             return
         self.banner_label.config(
-            text="Camera engine unavailable — registering students and live "
-                 "sessions are disabled. Viewing and exporting attendance "
-                 "still work.\n"
-                 f"{cv_engine.error_message()}")
-        # Keep the banner above the notebook even after a failed retry re-packs it.
-        self.banner.pack(side="top", fill="x", before=self.notebook)
+            text="⚠  Camera engine unavailable — registering students and "
+                 "live sessions are disabled. Viewing and exporting attendance "
+                 "still work.    " + cv_engine.error_message())
+        # Keep the banner above the pages even after a failed retry re-packs it.
+        self.banner.pack(side="top", fill="x", before=self.pages_container)
 
     def on_retry_engine(self):
         """Re-attempt the OpenCV load — for after the user installs the missing
@@ -108,65 +216,90 @@ class AttendanceApp(tk.Tk):
                 "OpenCV still could not be loaded:\n\n"
                 f"{cv_engine.error_message()}")
 
-    # ---------------- Register tab ----------------
-    def _build_register_tab(self):
-        frame = self.tab_register
-        pad = {"padx": 10, "pady": 6}
+    # ================= Register page =================
+    def _build_register_page(self):
+        page = self.pages["register"]
+        wrap = tk.Frame(page, bg=C["bg"])
+        wrap.pack(fill="both", expand=True, padx=28, pady=24)
+        self._page_header(
+            wrap, "Register Student",
+            "Capture a student's face and add them to the recognition model."
+        ).pack(fill="x", anchor="w")
 
-        ttk.Label(frame, text="Register a New Student",
-                  font=("Segoe UI", 13, "bold")).grid(row=0, column=0,
-                                                      columnspan=2, **pad)
+        body = tk.Frame(wrap, bg=C["bg"])
+        body.pack(fill="both", expand=True, pady=(18, 0))
+        body.columnconfigure(0, weight=3, uniform="cols")
+        body.columnconfigure(1, weight=2, uniform="cols")
+        body.rowconfigure(0, weight=1)
+
+        # --- Left: details form ---
+        left_o, left = self._card(body)
+        left_o.grid(row=0, column=0, sticky="nsew", padx=(0, 10))
+        tk.Label(left, text="Student details", bg=C["surface"], fg=C["text"],
+                 font=F["h2"]).pack(anchor="w", pady=(0, 14))
 
         self.var_name = tk.StringVar()
         self.var_regno = tk.StringVar()
         self.var_course = tk.StringVar()
+        for label, var in [("FULL NAME", self.var_name),
+                           ("REGISTRATION NO", self.var_regno),
+                           ("COURSE", self.var_course)]:
+            self._field(left, label, var).pack(fill="x", pady=(0, 8))
 
-        for i, (label, var) in enumerate([
-            ("Full Name", self.var_name),
-            ("Registration No", self.var_regno),
-            ("Course", self.var_course),
-        ], start=1):
-            ttk.Label(frame, text=label).grid(row=i, column=0, sticky="e", **pad)
-            ttk.Entry(frame, textvariable=var, width=34).grid(
-                row=i, column=1, sticky="w", **pad)
-
-        self._build_camera_row(frame).grid(row=4, column=0, columnspan=2, **pad)
+        self._build_camera_row(left).pack(fill="x", pady=(2, 12))
 
         self.btn_capture = ttk.Button(
-            frame, text="Register + Capture Faces (webcam)",
+            left, text="Register + Capture Faces", style="Primary.TButton",
             command=self.on_register)
-        self.btn_capture.grid(row=5, column=0, columnspan=2, **pad)
+        self.btn_capture.pack(anchor="w")
         self._camera_buttons.append(self.btn_capture)
 
-        self.lbl_reg_status = ttk.Label(frame, text="", foreground="green")
-        self.lbl_reg_status.grid(row=6, column=0, columnspan=2, **pad)
+        self.lbl_reg_status = tk.Label(
+            left, text="", bg=C["surface"], fg=C["success"], font=F["small"],
+            wraplength=380, justify="left")
+        self.lbl_reg_status.pack(anchor="w", pady=(12, 0))
 
-        ttk.Separator(frame, orient="horizontal").grid(
-            row=7, column=0, columnspan=2, sticky="ew", padx=10, pady=10)
+        # --- Right: registered students ---
+        right_o, right = self._card(body)
+        right_o.grid(row=0, column=1, sticky="nsew", padx=(10, 0))
+        tk.Label(right, text="Registered students", bg=C["surface"],
+                 fg=C["text"], font=F["h2"]).pack(anchor="w", pady=(0, 14))
 
-        ttk.Label(frame, text="Registered students:").grid(
-            row=8, column=0, columnspan=2, sticky="w", padx=10)
-        self.students_list = tk.Listbox(frame, width=70, height=8)
-        self.students_list.grid(row=9, column=0, columnspan=2, padx=10, pady=4)
+        listwrap = tk.Frame(right, bg=C["surface"])
+        listwrap.pack(fill="both", expand=True)
+        self.students_list = tk.Listbox(
+            listwrap, activestyle="none", bd=0, highlightthickness=0,
+            relief="flat", bg=C["surface_alt"], fg=C["text"], font=F["body"],
+            selectbackground=C["accent"], selectforeground=C["on_accent"])
+        self.students_list.pack(side="left", fill="both", expand=True)
+        sb = ttk.Scrollbar(listwrap, orient="vertical",
+                           command=self.students_list.yview)
+        self.students_list.configure(yscrollcommand=sb.set)
+        sb.pack(side="right", fill="y")
 
         self.btn_deregister = ttk.Button(
-            frame, text="De-register Selected", command=self.on_deregister)
-        self.btn_deregister.grid(row=10, column=0, columnspan=2, **pad)
+            right, text="De-register Selected", style="Danger.TButton",
+            command=self.on_deregister)
+        self.btn_deregister.pack(anchor="w", pady=(14, 0))
 
         self.refresh_students()
 
     # ---------------- Camera selection ----------------
     def _build_camera_row(self, parent):
         """Camera picker; one shared variable, so the selection made on one
-        tab follows the user to the other."""
-        row = ttk.Frame(parent)
-        ttk.Label(row, text="Camera device:").pack(side="left", padx=6)
-        box = ttk.Combobox(row, textvariable=self.var_camera, width=4,
+        page follows the user to the other."""
+        row = tk.Frame(parent, bg=C["surface"])
+        tk.Label(row, text="CAMERA DEVICE", bg=C["surface"], fg=C["muted"],
+                 font=F["small_bold"]).pack(anchor="w")
+        inner = tk.Frame(row, bg=C["surface"])
+        inner.pack(anchor="w", fill="x", pady=(4, 0))
+        box = ttk.Combobox(inner, textvariable=self.var_camera, width=5,
                            values=self.camera_choices, state="readonly")
         box.pack(side="left")
-        detect_btn = ttk.Button(row, text="Detect cameras",
+        detect_btn = ttk.Button(inner, text="Detect cameras",
+                                style="Secondary.TButton",
                                 command=self.on_detect_cameras)
-        detect_btn.pack(side="left", padx=8)
+        detect_btn.pack(side="left", padx=(8, 0))
         self._camera_boxes.append(box)
         self._camera_buttons.append(detect_btn)
         return row
@@ -212,7 +345,7 @@ class AttendanceApp(tk.Tk):
         for s in self._listed_students:
             self.students_list.insert(
                 tk.END,
-                f"#{s['student_id']}  {s['name']}  |  {s['registration_no']}  |  {s['course']}")
+                f"  #{s['student_id']}   {s['name']}   |   {s['registration_no']}   |   {s['course']}")
 
     def _set_busy(self, busy):
         """Disable register/de-register/session buttons while any webcam or
@@ -375,31 +508,40 @@ class AttendanceApp(tk.Tk):
         self._set_busy(False)
         self.refresh_students()
 
-    # ---------------- Session tab ----------------
-    def _build_session_tab(self):
-        frame = self.tab_session
-        pad = {"padx": 10, "pady": 8}
+    # ================= Session page =================
+    def _build_session_page(self):
+        page = self.pages["session"]
+        wrap = tk.Frame(page, bg=C["bg"])
+        wrap.pack(fill="both", expand=True, padx=28, pady=24)
+        self._page_header(
+            wrap, "Start Session",
+            "Open the camera and mark enrolled students present automatically."
+        ).pack(fill="x", anchor="w")
 
-        ttk.Label(frame, text="Start an Attendance Session",
-                  font=("Segoe UI", 13, "bold")).pack(**pad)
+        outer, card = self._card(wrap)
+        outer.pack(fill="x", pady=(18, 0))
+        tk.Label(card, text="Session details", bg=C["surface"], fg=C["text"],
+                 font=F["h2"]).pack(anchor="w", pady=(0, 14))
 
-        row = ttk.Frame(frame)
-        row.pack(**pad)
-        ttk.Label(row, text="Course / session name:").pack(side="left", padx=6)
         self.var_session = tk.StringVar(value="CS101")
-        ttk.Entry(row, textvariable=self.var_session, width=20).pack(side="left")
+        self._field(card, "COURSE / SESSION NAME", self.var_session,
+                    width=26).pack(fill="x", pady=(0, 10))
 
-        self._build_camera_row(frame).pack(**pad)
+        self._build_camera_row(card).pack(fill="x", pady=(2, 18))
 
-        self.btn_session = ttk.Button(frame, text="Start Camera Session",
-                                      command=self.on_session)
-        self.btn_session.pack(**pad)
+        self.btn_session = ttk.Button(
+            card, text="▶   Start Camera Session", style="Primary.TButton",
+            command=self.on_session)
+        self.btn_session.pack(anchor="w")
         self._camera_buttons.append(self.btn_session)
 
-        ttk.Label(frame, text="A camera window will open. Recognized students are\n"
-                              "marked present automatically (once per course per day).\n"
-                              "Press q in the camera window to end the session.",
-                  justify="center").pack(**pad)
+        tk.Label(
+            card,
+            text="A camera window opens. Recognized, enrolled students are marked\n"
+                 "present once per course per day. Press  q  in the camera window\n"
+                 "to end the session.",
+            bg=C["surface"], fg=C["muted"], font=F["small"],
+            justify="left").pack(anchor="w", pady=(16, 0))
 
     def on_session(self):
         if not recognize.MODEL_PATH.exists():
@@ -423,44 +565,61 @@ class AttendanceApp(tk.Tk):
 
         threading.Thread(target=work, daemon=True).start()
 
-    # ---------------- View tab ----------------
-    def _build_view_tab(self):
-        frame = self.tab_view
-        pad = {"padx": 8, "pady": 6}
+    # ================= Attendance (view) page =================
+    def _build_view_page(self):
+        page = self.pages["view"]
+        wrap = tk.Frame(page, bg=C["bg"])
+        wrap.pack(fill="both", expand=True, padx=28, pady=24)
+        self._page_header(
+            wrap, "Attendance",
+            "Filter, review and export attendance records."
+        ).pack(fill="x", anchor="w")
 
-        controls = ttk.Frame(frame)
-        controls.pack(fill="x", **pad)
+        filt_o, filt = self._card(wrap)
+        filt_o.pack(fill="x", pady=(18, 0))
 
-        ttk.Label(controls, text="Date (YYYY-MM-DD):").pack(side="left", padx=4)
+        tk.Label(filt, text="DATE", bg=C["surface"], fg=C["muted"],
+                 font=F["small_bold"]).pack(side="left", padx=(0, 6))
         self.var_fdate = tk.StringVar(value=date.today().isoformat())
-        ttk.Entry(controls, textvariable=self.var_fdate, width=12).pack(side="left")
+        ttk.Entry(filt, textvariable=self.var_fdate, width=12).pack(side="left")
 
-        ttk.Label(controls, text="Course:").pack(side="left", padx=4)
+        tk.Label(filt, text="COURSE", bg=C["surface"], fg=C["muted"],
+                 font=F["small_bold"]).pack(side="left", padx=(16, 6))
         self.var_fcourse = tk.StringVar()
-        ttk.Entry(controls, textvariable=self.var_fcourse, width=12).pack(side="left")
+        ttk.Entry(filt, textvariable=self.var_fcourse, width=14).pack(side="left")
 
-        ttk.Button(controls, text="Filter",
-                   command=self.refresh_attendance).pack(side="left", padx=6)
-        ttk.Button(controls, text="Show All",
+        ttk.Button(filt, text="Filter", style="Secondary.TButton",
+                   command=self.refresh_attendance).pack(side="left", padx=(16, 6))
+        ttk.Button(filt, text="Show All", style="Ghost.TButton",
                    command=self.show_all_attendance).pack(side="left")
-        ttk.Button(controls, text="Export CSV",
-                   command=self.on_export).pack(side="right", padx=4)
+        ttk.Button(filt, text="Export CSV", style="Primary.TButton",
+                   command=self.on_export).pack(side="left", padx=(16, 0))
+
+        table_o, table = self._card(wrap)
+        table_o.pack(fill="both", expand=True, pady=(14, 0))
 
         cols = ("name", "regno", "course", "date", "time", "status")
-        self.tree = ttk.Treeview(frame, columns=cols, show="headings", height=16)
+        self.tree = ttk.Treeview(table, columns=cols, show="headings", height=14)
         headings = ["Name", "Reg No", "Course", "Date", "Time", "Status"]
-        widths = [160, 110, 90, 90, 80, 80]
+        widths = [180, 120, 100, 100, 90, 90]
         for c, h, w in zip(cols, headings, widths):
             self.tree.heading(c, text=h)
             self.tree.column(c, width=w)
-        self.tree.pack(fill="both", expand=True, **pad)
+        self.tree.tag_configure("odd", background=C["surface"])
+        self.tree.tag_configure("even", background=C["surface_alt"])
+
+        sb = ttk.Scrollbar(table, orient="vertical", command=self.tree.yview)
+        self.tree.configure(yscrollcommand=sb.set)
+        self.tree.pack(side="left", fill="both", expand=True)
+        sb.pack(side="right", fill="y")
 
         self.refresh_attendance()
 
     def _load_rows(self, on_date=None, course=None):
         self.tree.delete(*self.tree.get_children())
-        for r in database.get_attendance(on_date, course):
-            self.tree.insert("", tk.END, values=(
+        for i, r in enumerate(database.get_attendance(on_date, course)):
+            tag = "even" if i % 2 else "odd"
+            self.tree.insert("", tk.END, tags=(tag,), values=(
                 r["name"], r["registration_no"], r["session_course"],
                 r["date"], r["time"], r["status"]))
 
