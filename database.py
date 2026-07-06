@@ -29,6 +29,7 @@ def init_db():
             registration_no TEXT NOT NULL UNIQUE,
             course TEXT NOT NULL,
             face_dir TEXT,
+            active INTEGER NOT NULL DEFAULT 1,
             created_at TEXT DEFAULT CURRENT_TIMESTAMP
         );
 
@@ -45,6 +46,11 @@ def init_db():
         );
         """
     )
+    # Migrate databases created before de-registration existed.
+    cols = {r["name"] for r in conn.execute("PRAGMA table_info(students)")}
+    if "active" not in cols:
+        conn.execute(
+            "ALTER TABLE students ADD COLUMN active INTEGER NOT NULL DEFAULT 1")
     conn.commit()
     conn.close()
 
@@ -75,11 +81,41 @@ def get_student(student_id):
     return dict(row) if row else None
 
 
-def list_students():
+def list_students(include_inactive=False):
+    query = "SELECT * FROM students"
+    if not include_inactive:
+        query += " WHERE active = 1"
+    query += " ORDER BY student_id"
     conn = get_connection()
-    rows = conn.execute("SELECT * FROM students ORDER BY student_id").fetchall()
+    rows = conn.execute(query).fetchall()
     conn.close()
     return [dict(r) for r in rows]
+
+
+def deactivate_student(student_id):
+    """De-register: mark inactive so the student is excluded from the
+    registered list and from recognition. Attendance history is kept."""
+    conn = get_connection()
+    conn.execute("UPDATE students SET active = 0 WHERE student_id = ?",
+                 (student_id,))
+    conn.commit()
+    conn.close()
+
+
+def remove_student_if_no_attendance(student_id):
+    """Rollback for a registration aborted before any face was captured
+    (e.g. webcam unavailable), so the registration number can be retried.
+    Refuses to delete a student with attendance rows — history is never
+    deleted. Returns True if the row was removed."""
+    conn = get_connection()
+    has_history = conn.execute(
+        "SELECT 1 FROM attendance WHERE student_id = ? LIMIT 1",
+        (student_id,)).fetchone()
+    if has_history is None:
+        conn.execute("DELETE FROM students WHERE student_id = ?", (student_id,))
+        conn.commit()
+    conn.close()
+    return has_history is None
 
 
 def mark_attendance(student_id, session_course, confidence=None):

@@ -3,7 +3,8 @@
 Usage:
     python recognize.py
 Prompts for the course/session name, opens the webcam, and marks each
-recognized registered student present (once per course per day).
+recognized registered student present (once per course per day) — but only
+if the session course matches their registered course (enrollment check).
 Unknown faces are labelled Unknown and ignored. Press 'q' to end session.
 
 LBPH confidence: LOWER is BETTER (it is a distance). Faces with
@@ -25,9 +26,16 @@ CASCADE = cv2.CascadeClassifier(
 )
 
 
+def is_enrolled(student, session_course):
+    """Enrollment check (scope item 10): the student's single registered
+    course must match the session course, case-insensitive and trimmed."""
+    return student["course"].strip().lower() == session_course.strip().lower()
+
+
 def load_recognizer():
     if not MODEL_PATH.exists():
-        raise SystemExit("No trained model found. Run train.py first.")
+        raise RuntimeError(
+            "No trained model found. Register at least one student first.")
     recognizer = cv2.face.LBPHFaceRecognizer_create()
     recognizer.read(str(MODEL_PATH))
     return recognizer
@@ -41,7 +49,9 @@ def run_session(session_course, camera_index=0):
 
     cap = cv2.VideoCapture(camera_index)
     if not cap.isOpened():
-        raise RuntimeError("Cannot open webcam.")
+        raise RuntimeError(
+            "Cannot open webcam. Close other apps using the camera, "
+            "or try camera_index=1.")
 
     print(f"Session '{session_course}' started. Press q to end.")
 
@@ -51,14 +61,20 @@ def run_session(session_course, camera_index=0):
             continue
 
         gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-        faces = CASCADE.detectMultiScale(gray, scaleFactor=1.2, minNeighbors=5,
-                                         minSize=(80, 80))
+        # More sensitive than registration (1.2 / 80px): a session face may
+        # be further from the camera; see Known Issue #1 in README.md.
+        faces = CASCADE.detectMultiScale(gray, scaleFactor=1.1, minNeighbors=5,
+                                         minSize=(60, 60))
 
         for (x, y, w, h) in faces:
             face = cv2.resize(gray[y:y + h, x:x + w], FACE_SIZE)
             label, confidence = recognizer.predict(face)
 
-            if confidence <= THRESHOLD and label in students:
+            accepted = confidence <= THRESHOLD and label in students
+            print(f"[predict] label={label} confidence={confidence:.1f} -> "
+                  f"{'ACCEPT' if accepted else 'REJECT'}")
+
+            if accepted and is_enrolled(students[label], session_course):
                 student = students[label]
                 name = student["name"]
                 color = (0, 255, 0)
@@ -73,6 +89,15 @@ def run_session(session_course, camera_index=0):
                               f"(confidence {confidence:.1f})")
                     else:
                         print(f"  {name} already marked today.")
+            elif accepted:
+                # Recognized but not enrolled in this session's course:
+                # orange box, no attendance row (scope item 10).
+                student = students[label]
+                color = (0, 165, 255)
+                text = "Recognized - not enrolled"
+                print(f"[enroll] {student['name']} registered course="
+                      f"'{student['course']}' session='{session_course}' "
+                      f"-> NOT MARKED")
             else:
                 color = (0, 0, 255)
                 text = f"Unknown ({confidence:.0f})"
@@ -95,4 +120,7 @@ def run_session(session_course, camera_index=0):
 
 if __name__ == "__main__":
     course = input("Course / session name (e.g. CS101): ").strip() or "GENERAL"
-    run_session(course)
+    try:
+        run_session(course)
+    except RuntimeError as e:
+        raise SystemExit(str(e))

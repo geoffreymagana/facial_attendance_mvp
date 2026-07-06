@@ -1,0 +1,9 @@
+# Core dependencies
+# Must be opencv-contrib-python (cv2.face / LBPH lives in contrib).
+# Pinned below 5: the OpenCV 5 wheels no longer bundle the Haar cascade
+# XML files that register.py / recognize.py load from cv2.data.haarcascades.
+opencv-contrib-python>=4.8,<5
+numpy
+
+# Testing
+pytest

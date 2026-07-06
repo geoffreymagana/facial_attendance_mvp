@@ -34,9 +34,20 @@ def load_training_data():
 
 
 def train():
+    """Train on all face samples. Returns the number of students trained.
+
+    With zero samples (e.g. the last student was de-registered) any existing
+    model file is removed — a stale model would keep recognizing deleted
+    faces — and 0 is returned instead of raising.
+    """
     images, labels = load_training_data()
     if not images:
-        raise SystemExit("No training images found. Run register.py first.")
+        if MODEL_PATH.exists():
+            MODEL_PATH.unlink()
+            print(f"No training images; removed stale model {MODEL_PATH}")
+        else:
+            print("No training images found.")
+        return 0
 
     recognizer = cv2.face.LBPHFaceRecognizer_create(
         radius=1, neighbors=8, grid_x=8, grid_y=8
@@ -47,7 +58,9 @@ def train():
     n_students = len(set(labels))
     print(f"Trained on {len(images)} images across {n_students} student(s).")
     print(f"Model saved to {MODEL_PATH}")
+    return n_students
 
 
 if __name__ == "__main__":
-    train()
+    if train() == 0:
+        raise SystemExit("Run register.py first.")

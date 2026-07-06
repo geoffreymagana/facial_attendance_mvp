@@ -8,10 +8,13 @@ Three screens in one window:
 Run:  python app.py
 """
 
+import shutil
+import sqlite3
 import threading
 import tkinter as tk
 from tkinter import ttk, messagebox, filedialog
 from datetime import date
+from pathlib import Path
 
 import database
 import register
@@ -77,14 +80,27 @@ class AttendanceApp(tk.Tk):
             row=7, column=0, columnspan=2, sticky="w", padx=10)
         self.students_list = tk.Listbox(frame, width=70, height=8)
         self.students_list.grid(row=8, column=0, columnspan=2, padx=10, pady=4)
+
+        self.btn_deregister = ttk.Button(
+            frame, text="De-register Selected", command=self.on_deregister)
+        self.btn_deregister.grid(row=9, column=0, columnspan=2, **pad)
+
         self.refresh_students()
 
     def refresh_students(self):
         self.students_list.delete(0, tk.END)
-        for s in database.list_students():
+        self._listed_students = database.list_students()
+        for s in self._listed_students:
             self.students_list.insert(
                 tk.END,
                 f"#{s['student_id']}  {s['name']}  |  {s['registration_no']}  |  {s['course']}")
+
+    def _set_busy(self, busy):
+        """Disable register/de-register/session buttons while any webcam or
+        retrain job runs — retraining during a live session is unsupported."""
+        state = "disabled" if busy else "normal"
+        for btn in (self.btn_capture, self.btn_deregister, self.btn_session):
+            btn.config(state=state)
 
     def on_register(self):
         name = self.var_name.get().strip()
@@ -95,27 +111,88 @@ class AttendanceApp(tk.Tk):
                                    "Fill in name, registration number and course.")
             return
 
-        self.btn_capture.config(state="disabled")
+        self._set_busy(True)
         self.lbl_reg_status.config(text="Capturing faces... look at the camera.")
 
         def work():
+            student_id = None
             try:
                 student_id = database.add_student(name, regno, course)
-                register.capture_faces(student_id)
+                count = register.capture_faces(student_id)
                 train.train()
-                msg = f"Registered {name} and retrained model."
+                self.after(0, lambda: self._register_done(name, count))
+            except sqlite3.IntegrityError:
+                self.after(0, lambda: self._register_failed(
+                    "Duplicate registration number",
+                    f"A student with registration number '{regno}' already "
+                    f"exists. Use a different number."))
             except Exception as e:
-                msg = f"Error: {e}"
-            self.after(0, lambda: self._register_done(msg))
+                # Roll back the half-created student only if no face sample
+                # was saved (e.g. webcam unavailable), so the registration
+                # number can be retried.
+                face_dir = Path(__file__).parent / "data" / "faces" / str(student_id)
+                if student_id is not None and not any(face_dir.glob("*.png")):
+                    database.remove_student_if_no_attendance(student_id)
+                self.after(0, lambda: self._register_failed(
+                    "Registration failed", str(e)))
 
         threading.Thread(target=work, daemon=True).start()
 
-    def _register_done(self, msg):
-        self.lbl_reg_status.config(text=msg)
-        self.btn_capture.config(state="normal")
+    def _register_done(self, name, count):
+        self.lbl_reg_status.config(text=f"Registered {name} and retrained model.")
+        self._set_busy(False)
         self.refresh_students()
         for v in (self.var_name, self.var_regno, self.var_course):
             v.set("")
+        if count < 10:
+            messagebox.showwarning(
+                "Few samples captured",
+                f"Only {count} face sample(s) were captured (10+ needed for "
+                f"reliable recognition). De-register and register again with "
+                f"the face clearly visible.")
+
+    def _register_failed(self, title, msg):
+        self.lbl_reg_status.config(text="")
+        self._set_busy(False)
+        self.refresh_students()
+        messagebox.showerror(title, msg)
+
+    def on_deregister(self):
+        sel = self.students_list.curselection()
+        if not sel:
+            messagebox.showwarning("No selection",
+                                   "Select a student in the list first.")
+            return
+        student = self._listed_students[sel[0]]
+        if not messagebox.askyesno(
+                "De-register student",
+                f"De-register {student['name']} ({student['registration_no']})?\n\n"
+                f"Their face images are deleted and they will no longer be "
+                f"recognized. Attendance history is kept."):
+            return
+
+        self._set_busy(True)
+        self.lbl_reg_status.config(text="De-registering and retraining...")
+
+        def work():
+            try:
+                database.deactivate_student(student["student_id"])
+                face_dir = (Path(__file__).parent / "data" / "faces"
+                            / str(student["student_id"]))
+                shutil.rmtree(face_dir, ignore_errors=True)
+                train.train()  # removes the model file if no students remain
+                msg = f"De-registered {student['name']} and retrained model."
+                self.after(0, lambda: self._deregister_done(msg))
+            except Exception as e:
+                self.after(0, lambda: self._register_failed(
+                    "De-registration failed", str(e)))
+
+        threading.Thread(target=work, daemon=True).start()
+
+    def _deregister_done(self, msg):
+        self.lbl_reg_status.config(text=msg)
+        self._set_busy(False)
+        self.refresh_students()
 
     # ---------------- Session tab ----------------
     def _build_session_tab(self):
@@ -141,15 +218,22 @@ class AttendanceApp(tk.Tk):
                   justify="center").pack(**pad)
 
     def on_session(self):
+        if not recognize.MODEL_PATH.exists():
+            messagebox.showerror(
+                "No trained model",
+                "No trained model found. Register at least one student "
+                "first — training runs automatically after registration.")
+            return
+
         course = self.var_session.get().strip() or "GENERAL"
-        self.btn_session.config(state="disabled")
+        self._set_busy(True)
 
         def work():
             try:
                 recognize.run_session(course)
             except Exception as e:
                 self.after(0, lambda: messagebox.showerror("Session error", str(e)))
-            self.after(0, lambda: self.btn_session.config(state="normal"))
+            self.after(0, lambda: self._set_busy(False))
             self.after(0, self.refresh_attendance)
 
         threading.Thread(target=work, daemon=True).start()
