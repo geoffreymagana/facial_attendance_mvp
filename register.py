@@ -7,17 +7,13 @@ NUM_SAMPLES grayscale face crops saved to data/faces/<student_id>/.
 Press 'q' to abort early.
 """
 
-import cv2
 from pathlib import Path
 
+import cv_engine
 import database
 
 NUM_SAMPLES = 30
 FACE_SIZE = (200, 200)
-
-CASCADE = cv2.CascadeClassifier(
-    cv2.data.haarcascades + "haarcascade_frontalface_default.xml"
-)
 
 
 def detect_cameras(max_devices=5):
@@ -25,6 +21,7 @@ def detect_cameras(max_devices=5):
     the built-in webcam, a USB webcam, or a phone exposed as a camera by a
     webcam app (DroidCam, Iriun, EpocCam, ...). Returns e.g. [0, 1];
     empty list means no working camera was found."""
+    cv2 = cv_engine.require_cv2()
     found = []
     for index in range(max_devices):
         cap = cv2.VideoCapture(index)
@@ -37,6 +34,8 @@ def detect_cameras(max_devices=5):
 
 
 def capture_faces(student_id, num_samples=NUM_SAMPLES, camera_index=0):
+    cv2 = cv_engine.require_cv2()
+    cascade = cv_engine.face_cascade()
     out_dir = Path(__file__).parent / "data" / "faces" / str(student_id)
     out_dir.mkdir(parents=True, exist_ok=True)
 
@@ -61,7 +60,7 @@ def capture_faces(student_id, num_samples=NUM_SAMPLES, camera_index=0):
             continue
 
         gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-        faces = CASCADE.detectMultiScale(gray, scaleFactor=1.2, minNeighbors=5,
+        faces = cascade.detectMultiScale(gray, scaleFactor=1.2, minNeighbors=5,
                                          minSize=(80, 80))
 
         for (x, y, w, h) in faces[:1]:  # take only the largest/first face

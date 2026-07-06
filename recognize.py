@@ -16,8 +16,7 @@ import csv
 from datetime import datetime
 from pathlib import Path
 
-import cv2
-
+import cv_engine
 import database
 
 THRESHOLD = 65.0  # tune this during testing (evaluate.py suggests a value)
@@ -26,16 +25,12 @@ FACE_SIZE = (200, 200)
 MODEL_PATH = Path(__file__).parent / "data" / "lbph_model.yml"
 PREDICTIONS_LOG = Path(__file__).parent / "data" / "predictions_log.csv"
 
-CASCADE = cv2.CascadeClassifier(
-    cv2.data.haarcascades + "haarcascade_frontalface_default.xml"
-)
-
 
 def preprocess(gray_face):
     """Histogram-equalize a grayscale face crop so LBPH compares facial
     texture rather than overall lighting. Must stay identical to the
     preprocessing applied at training time (train.py)."""
-    return cv2.equalizeHist(gray_face)
+    return cv_engine.require_cv2().equalizeHist(gray_face)
 
 
 def is_enrolled(student, session_course):
@@ -48,7 +43,7 @@ def load_recognizer():
     if not MODEL_PATH.exists():
         raise RuntimeError(
             "No trained model found. Register at least one student first.")
-    recognizer = cv2.face.LBPHFaceRecognizer_create()
+    recognizer = cv_engine.require_cv2().face.LBPHFaceRecognizer_create()
     recognizer.read(str(MODEL_PATH))
     return recognizer
 
@@ -61,6 +56,7 @@ def match_existing_student(face_dir, exclude_id=None):
     """
     if not MODEL_PATH.exists():
         return None
+    cv2 = cv_engine.require_cv2()
     recognizer = load_recognizer()
     students = {s["student_id"]: s for s in database.list_students()}
     students.pop(exclude_id, None)
@@ -102,6 +98,8 @@ def _open_predictions_log():
 
 
 def run_session(session_course, camera_index=0):
+    cv2 = cv_engine.require_cv2()
+    cascade = cv_engine.face_cascade()
     database.init_db()
     recognizer = load_recognizer()
     students = {s["student_id"]: s for s in database.list_students()}
@@ -124,7 +122,7 @@ def run_session(session_course, camera_index=0):
         gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
         # More sensitive than registration (1.2 / 80px): a session face may
         # be further from the camera.
-        faces = CASCADE.detectMultiScale(gray, scaleFactor=1.1, minNeighbors=5,
+        faces = cascade.detectMultiScale(gray, scaleFactor=1.1, minNeighbors=5,
                                          minSize=(60, 60))
 
         for (x, y, w, h) in faces:

@@ -16,6 +16,7 @@ from tkinter import ttk, messagebox, filedialog
 from datetime import date
 from pathlib import Path
 
+import cv_engine
 import database
 import register
 import train
@@ -36,19 +37,76 @@ class AttendanceApp(tk.Tk):
         self.camera_choices = ["0"]
         self._camera_boxes = []
 
-        notebook = ttk.Notebook(self)
-        notebook.pack(fill="both", expand=True, padx=8, pady=8)
+        # Whether the OpenCV runtime loaded. When it did not (e.g. a missing
+        # DLL on a fresh Windows box), the window still opens: only the
+        # camera-dependent controls are disabled, and a banner offers a retry
+        # once the user installs the runtime or plugs in an external device.
+        self.camera_ready = cv_engine.available()
+        self._camera_buttons = []
 
-        self.tab_register = ttk.Frame(notebook)
-        self.tab_session = ttk.Frame(notebook)
-        self.tab_view = ttk.Frame(notebook)
-        notebook.add(self.tab_register, text="  Register Student  ")
-        notebook.add(self.tab_session, text="  Start Session  ")
-        notebook.add(self.tab_view, text="  View Attendance  ")
+        self.notebook = ttk.Notebook(self)
+        self.notebook.pack(fill="both", expand=True, padx=8, pady=8)
+
+        self.tab_register = ttk.Frame(self.notebook)
+        self.tab_session = ttk.Frame(self.notebook)
+        self.tab_view = ttk.Frame(self.notebook)
+        self.notebook.add(self.tab_register, text="  Register Student  ")
+        self.notebook.add(self.tab_session, text="  Start Session  ")
+        self.notebook.add(self.tab_view, text="  View Attendance  ")
 
         self._build_register_tab()
         self._build_session_tab()
         self._build_view_tab()
+
+        # Banner sits above the notebook; built last so self.notebook exists.
+        self._build_banner()
+
+        # Reflect the initial engine state onto the camera-dependent buttons.
+        self._set_busy(False)
+
+    # ---------------- Camera-engine banner ----------------
+    def _build_banner(self):
+        """A red strip shown only when OpenCV failed to load. It explains why
+        camera features are off and offers a retry, so a DLL/runtime problem
+        degrades the app instead of preventing it from opening."""
+        self.banner = tk.Frame(self, bg="#8a1f1f")
+        self.banner_label = tk.Label(
+            self.banner, bg="#8a1f1f", fg="white", justify="left",
+            anchor="w", padx=10, pady=6)
+        self.banner_label.pack(side="left", fill="x", expand=True)
+        tk.Button(self.banner, text="Retry camera engine",
+                  command=self.on_retry_engine).pack(side="right", padx=8, pady=4)
+        self._update_banner()
+
+    def _update_banner(self):
+        if self.camera_ready:
+            self.banner.pack_forget()
+            return
+        self.banner_label.config(
+            text="Camera engine unavailable — registering students and live "
+                 "sessions are disabled. Viewing and exporting attendance "
+                 "still work.\n"
+                 f"{cv_engine.error_message()}")
+        # Keep the banner above the notebook even after a failed retry re-packs it.
+        self.banner.pack(side="top", fill="x", before=self.notebook)
+
+    def on_retry_engine(self):
+        """Re-attempt the OpenCV load — for after the user installs the missing
+        runtime or connects an external camera."""
+        cv_engine.reset()
+        self.camera_ready = cv_engine.available()
+        self._update_banner()
+        self._set_busy(False)
+        if self.camera_ready:
+            messagebox.showinfo(
+                "Camera engine ready",
+                "OpenCV loaded successfully. Camera features are now enabled. "
+                "Use 'Detect cameras' to find a connected device.")
+        else:
+            messagebox.showerror(
+                "Still unavailable",
+                "OpenCV still could not be loaded:\n\n"
+                f"{cv_engine.error_message()}")
 
     # ---------------- Register tab ----------------
     def _build_register_tab(self):
@@ -78,6 +136,7 @@ class AttendanceApp(tk.Tk):
             frame, text="Register + Capture Faces (webcam)",
             command=self.on_register)
         self.btn_capture.grid(row=5, column=0, columnspan=2, **pad)
+        self._camera_buttons.append(self.btn_capture)
 
         self.lbl_reg_status = ttk.Label(frame, text="", foreground="green")
         self.lbl_reg_status.grid(row=6, column=0, columnspan=2, **pad)
@@ -105,9 +164,11 @@ class AttendanceApp(tk.Tk):
         box = ttk.Combobox(row, textvariable=self.var_camera, width=4,
                            values=self.camera_choices, state="readonly")
         box.pack(side="left")
-        ttk.Button(row, text="Detect cameras",
-                   command=self.on_detect_cameras).pack(side="left", padx=8)
+        detect_btn = ttk.Button(row, text="Detect cameras",
+                                command=self.on_detect_cameras)
+        detect_btn.pack(side="left", padx=8)
         self._camera_boxes.append(box)
+        self._camera_buttons.append(detect_btn)
         return row
 
     def _camera_index(self):
@@ -155,10 +216,13 @@ class AttendanceApp(tk.Tk):
 
     def _set_busy(self, busy):
         """Disable register/de-register/session buttons while any webcam or
-        retrain job runs — retraining during a live session is unsupported."""
-        state = "disabled" if busy else "normal"
-        for btn in (self.btn_capture, self.btn_deregister, self.btn_session):
-            btn.config(state=state)
+        retrain job runs — retraining during a live session is unsupported.
+        Camera-dependent buttons stay disabled while the OpenCV engine is
+        unavailable, regardless of the busy state."""
+        self.btn_deregister.config(state="disabled" if busy else "normal")
+        for btn in self._camera_buttons:
+            enabled = self.camera_ready and not busy
+            btn.config(state="normal" if enabled else "disabled")
 
     def on_register(self):
         name = self.var_name.get().strip()
@@ -290,8 +354,15 @@ class AttendanceApp(tk.Tk):
                 face_dir = (Path(__file__).parent / "data" / "faces"
                             / str(student["student_id"]))
                 shutil.rmtree(face_dir, ignore_errors=True)
-                train.train()  # removes the model file if no students remain
-                msg = f"De-registered {student['name']} and retrained model."
+                if self.camera_ready:
+                    train.train()  # removes the model file if no students remain
+                    msg = f"De-registered {student['name']} and retrained model."
+                else:
+                    # No OpenCV to retrain with. The student is deactivated and
+                    # their images gone; the model refreshes on the next
+                    # registration (or retry) once the engine is available.
+                    msg = (f"De-registered {student['name']}. Model will refresh "
+                           f"when the camera engine is available.")
                 self.after(0, lambda: self._deregister_done(msg))
             except Exception as e:
                 self.after(0, lambda: self._register_failed(
@@ -323,6 +394,7 @@ class AttendanceApp(tk.Tk):
         self.btn_session = ttk.Button(frame, text="Start Camera Session",
                                       command=self.on_session)
         self.btn_session.pack(**pad)
+        self._camera_buttons.append(self.btn_session)
 
         ttk.Label(frame, text="A camera window will open. Recognized students are\n"
                               "marked present automatically (once per course per day).\n"

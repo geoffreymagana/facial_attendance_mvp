@@ -10,6 +10,7 @@ import cv2
 import numpy as np
 import pytest
 
+import cv_engine
 import evaluate
 import recognize
 import register
@@ -186,7 +187,7 @@ def test_detect_cameras_returns_index_list():
 def test_haar_cascade_is_available():
     """Guards the dependency requirement: opencv-contrib-python 4.x must
     bundle the frontal-face cascade (OpenCV 5 wheels dropped it)."""
-    assert not recognize.CASCADE.empty()
+    assert not cv_engine.face_cascade().empty()
 
 
 def test_cascade_detects_a_real_face_pattern():
@@ -199,7 +200,7 @@ def test_cascade_detects_a_real_face_pattern():
     cv2.ellipse(img, (200, 260), (30, 12), 0, 0, 360, 90, -1)    # mouth
     img = cv2.GaussianBlur(img, (7, 7), 0)
 
-    faces = recognize.CASCADE.detectMultiScale(
+    faces = cv_engine.face_cascade().detectMultiScale(
         img, scaleFactor=1.1, minNeighbors=3, minSize=(80, 80))
     # Haar cascades are approximate; assert it runs and returns a
     # well-formed result rather than demanding a hit on synthetic input.

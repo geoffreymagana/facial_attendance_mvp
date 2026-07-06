@@ -5,9 +5,10 @@ label, and saves the model to data/lbph_model.yml.
 Run this after every new registration.
 """
 
-import cv2
 import numpy as np
 from pathlib import Path
+
+import cv_engine
 
 DATA_DIR = Path(__file__).parent / "data"
 FACES_DIR = DATA_DIR / "faces"
@@ -18,6 +19,10 @@ def load_training_data():
     images, labels = [], []
     if not FACES_DIR.exists():
         return images, labels
+    # Load cv2 only once we know there is at least one sample to decode, so
+    # the "no samples -> remove stale model" path in train() still works when
+    # OpenCV is unavailable (e.g. de-registering the last student).
+    cv2 = None
     for student_dir in sorted(FACES_DIR.iterdir()):
         if not student_dir.is_dir():
             continue
@@ -26,6 +31,8 @@ def load_training_data():
         except ValueError:
             continue
         for img_path in student_dir.glob("*.png"):
+            if cv2 is None:
+                cv2 = cv_engine.require_cv2()
             img = cv2.imread(str(img_path), cv2.IMREAD_GRAYSCALE)
             if img is not None:
                 # Equalize lighting; must match recognize.preprocess().
@@ -50,6 +57,7 @@ def train():
             print("No training images found.")
         return 0
 
+    cv2 = cv_engine.require_cv2()
     recognizer = cv2.face.LBPHFaceRecognizer_create(
         radius=1, neighbors=8, grid_x=8, grid_y=8
     )

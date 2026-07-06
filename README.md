@@ -160,6 +160,7 @@ semester and keep the file.
 | Session started with no trained model | Error dialog, no crash |
 | Duplicate registration number | Error dialog (database UNIQUE constraint) |
 | Webcam busy or absent | Error dialog with a camera-index hint |
+| OpenCV runtime fails to load (e.g. missing DLL on Windows) | GUI still opens; a banner explains camera features are disabled and offers **Retry camera engine**. Viewing/exporting attendance keeps working |
 | Webcam fails during registration before any sample is saved | Student record rolled back so the registration number can be retried |
 | Multiple faces in frame during a session | All faces are processed |
 | Multiple faces in frame during registration | Only the first face is sampled |
@@ -320,6 +321,11 @@ with the measurements above that justify it.
   connected, then click Detect cameras again.
 - **`cv2.face` AttributeError** — plain opencv-python is installed instead
   of opencv-contrib-python; see Setup.
+- **"Camera engine unavailable" banner / `DLL load failed while importing
+  cv2`** — the OpenCV native libraries could not load. On Windows this is
+  usually a missing Microsoft Visual C++ redistributable; install it (or
+  reinstall `opencv-contrib-python`), then click **Retry camera engine**.
+  The rest of the app (viewing and exporting attendance) works meanwhile.
 - **Poor recognition** — recapture samples in better lighting and make
   sure the face fills a good portion of the frame during registration.
 - **Camera window frozen on Linux** — install `opencv-contrib-python`
