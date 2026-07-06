@@ -180,6 +180,19 @@ class AttendanceApp(tk.Tk):
                 count = register.capture_faces(student_id,
                                                camera_index=camera_index)
                 face_dir = Path(__file__).parent / "data" / "faces" / str(student_id)
+                if count == 0:
+                    # Nothing to train on: cancel instead of saving a ghost
+                    # student that the model can never recognize.
+                    shutil.rmtree(face_dir, ignore_errors=True)
+                    database.remove_student_if_no_attendance(student_id)
+                    self.after(0, lambda: self._register_failed(
+                        "No face captured",
+                        "The camera never detected a face, so the "
+                        "registration was cancelled. Make sure the face is "
+                        "well lit and fills the frame — and if you are using "
+                        "a phone camera, hold it in landscape so the face is "
+                        "upright. Then register again."))
+                    return
                 dup = recognize.match_existing_student(face_dir,
                                                        exclude_id=student_id)
                 if dup:
