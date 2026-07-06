@@ -1,0 +1,11 @@
+# Runtime data: student face images, SQLite DB, trained model
+data/
+
+# Python
+__pycache__/
+*.pyc
+.pytest_cache/
+.venv/
+
+# Exports
+*.csv
