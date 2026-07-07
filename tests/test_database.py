@@ -169,3 +169,52 @@ def test_export_attendance_csv_empty(db, tmp_path):
     with open(out, newline="") as f:
         rows = list(csv.reader(f))
     assert len(rows) == 1  # header only
+
+
+def test_mark_session_absentees_marks_only_unseen_enrolled(db):
+    """Ending a CS101 session marks enrolled-but-unseen students Absent,
+    leaves the recognized student Present, and ignores other courses."""
+    a = db.add_student("Alice", "R1", "CS101")
+    db.add_student("Bob", "R2", " cs101 ")   # enrolled (case/space-insensitive)
+    db.add_student("Carol", "R3", "MATH200")  # different course
+
+    db.mark_attendance(a, "CS101", confidence=40.0)  # Alice seen
+    newly_absent = db.mark_session_absentees("CS101")
+
+    assert newly_absent == 1  # only Bob
+    statuses = {r["name"]: r["status"] for r in db.get_attendance(course="CS101")}
+    assert statuses == {"Alice": "Present", "Bob": "Absent"}
+    # Carol's course did not match, so she gets no row at all.
+    assert all(r["name"] != "Carol" for r in db.get_attendance())
+
+
+def test_mark_session_absentees_skips_deactivated_students(db):
+    a = db.add_student("Alice", "R1", "CS101")
+    b = db.add_student("Bob", "R2", "CS101")
+    db.deactivate_student(b)
+
+    assert db.mark_session_absentees("CS101") == 1  # only active Alice
+    names = {r["name"] for r in db.get_attendance(course="CS101")}
+    assert names == {"Alice"}
+
+
+def test_late_arrival_upgrades_absent_to_present(db):
+    """A student swept Absent who then appears in a later same-day session is
+    upgraded to Present without creating a duplicate row."""
+    sid = db.add_student("Alice", "R1", "CS101")
+    db.mark_session_absentees("CS101")  # Alice -> Absent
+    assert db.get_attendance()[0]["status"] == "Absent"
+
+    assert db.mark_attendance(sid, "CS101", confidence=50.0) is True  # upgraded
+    records = db.get_attendance()
+    assert len(records) == 1
+    assert records[0]["status"] == "Present"
+    assert records[0]["confidence"] == 50.0
+
+
+def test_second_sweep_creates_no_duplicates(db):
+    a = db.add_student("Alice", "R1", "CS101")
+    db.mark_attendance(a, "CS101")          # present
+    assert db.mark_session_absentees("CS101") == 0   # nobody unseen
+    assert db.mark_session_absentees("CS101") == 0   # re-run is idempotent
+    assert len(db.get_attendance(course="CS101")) == 1

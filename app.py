@@ -414,12 +414,19 @@ class AttendanceApp(tk.Tk):
         self._set_busy(True)
 
         def work():
+            summary = None
             try:
-                recognize.run_session(course, camera_index=camera_index)
+                summary = recognize.run_session(course, camera_index=camera_index)
             except Exception as e:
                 self.after(0, lambda: messagebox.showerror("Session error", str(e)))
             self.after(0, lambda: self._set_busy(False))
             self.after(0, self.refresh_attendance)
+            if summary is not None:
+                self.after(0, lambda: messagebox.showinfo(
+                    "Session ended",
+                    f"Session '{course}' ended.\n\n"
+                    f"Present (recognized this session): {summary['present']}\n"
+                    f"Absent (enrolled but not seen): {summary['absent']}"))
 
         threading.Thread(target=work, daemon=True).start()
 
@@ -453,6 +460,9 @@ class AttendanceApp(tk.Tk):
         for c, h, w in zip(cols, headings, widths):
             self.tree.heading(c, text=h)
             self.tree.column(c, width=w)
+        # Colour the status so absentees stand out from those present.
+        self.tree.tag_configure("present", foreground="#15803d")
+        self.tree.tag_configure("absent", foreground="#b91c1c")
         self.tree.pack(fill="both", expand=True, **pad)
 
         self.refresh_attendance()
@@ -460,7 +470,8 @@ class AttendanceApp(tk.Tk):
     def _load_rows(self, on_date=None, course=None):
         self.tree.delete(*self.tree.get_children())
         for r in database.get_attendance(on_date, course):
-            self.tree.insert("", tk.END, values=(
+            status_tag = "absent" if r["status"] == "Absent" else "present"
+            self.tree.insert("", tk.END, tags=(status_tag,), values=(
                 r["name"], r["registration_no"], r["session_course"],
                 r["date"], r["time"], r["status"]))
 
