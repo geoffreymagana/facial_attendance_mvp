@@ -186,7 +186,7 @@ def mark_session_absentees(session_course):
     return newly_absent
 
 
-def get_attendance(on_date=None, course=None):
+def get_attendance(on_date=None, course=None, status=None):
     query = (
         "SELECT a.attendance_id, s.name, s.registration_no, a.session_course, "
         "a.date, a.time, a.status, a.confidence "
@@ -199,6 +199,9 @@ def get_attendance(on_date=None, course=None):
     if course:
         query += " AND a.session_course = ?"
         params.append(course)
+    if status:
+        query += " AND a.status = ?"
+        params.append(status)
     query += " ORDER BY a.date DESC, a.time DESC"
     conn = get_connection()
     rows = conn.execute(query, params).fetchall()
@@ -206,9 +209,9 @@ def get_attendance(on_date=None, course=None):
     return [dict(r) for r in rows]
 
 
-def export_attendance_csv(filepath, on_date=None, course=None):
+def export_attendance_csv(filepath, on_date=None, course=None, status=None):
     import csv
-    records = get_attendance(on_date, course)
+    records = get_attendance(on_date, course, status)
     with open(filepath, "w", newline="") as f:
         writer = csv.writer(f)
         writer.writerow(["Name", "Reg No", "Course", "Date", "Time", "Status"])

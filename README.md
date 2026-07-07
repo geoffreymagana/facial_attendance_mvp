@@ -69,8 +69,8 @@ Operation is split into two phases:
   Present, and a latecomer who appears in a later same-day session for the
   same course is upgraded from Absent back to Present. The GUI shows a
   present/absent summary at session end and colours the status column.
-- **Attendance reports** — view attendance filtered by date and/or course
-  in the GUI, and export the filtered view to CSV.
+- **Attendance reports** — view attendance filtered by date, course and/or
+  status (Present/Absent) in the GUI, and export the filtered view to CSV.
 - **De-registration** — removes a student from recognition: the student is
   marked inactive, their face images are deleted, and the model is
   retrained. Their attendance history is deliberately preserved so past
@@ -174,6 +174,7 @@ semester and keep the file.
 | Same student, different course, same day | Marked separately per course — only for the course they are enrolled in |
 | Session ends with enrolled students unseen | Each unseen enrolled student is recorded Absent for that course and day |
 | Latecomer appears in a later same-day session | Their Absent record is upgraded to Present (no duplicate row) |
+| Status filter set to Present or Absent in the View tab | Only rows with that status are shown and exported; "All" (the default) shows both |
 | Recognized student, session course ≠ their registered course | Orange "Recognized - not enrolled" box, console log, no attendance row |
 | Session course typed with different casing/spacing (e.g. " cs101 ") | Still matches — comparison is case-insensitive and trimmed |
 | De-registered student appears in a session | Shown as Unknown (excluded from the model after retraining) |
@@ -215,8 +216,8 @@ tabs:
 2. **Start Session** — enter the course name and start the camera.
    Recognized enrolled students are marked Present; press `q` in the
    camera window to end the session.
-3. **View Attendance** — filter records by date and/or course, and export
-   the current view to CSV.
+3. **View Attendance** — filter records by date, course and/or status
+   (Present/Absent), and export the current view to CSV.
 
 ### Using an external camera (USB webcam or phone)
 
@@ -313,7 +314,9 @@ project report.
 8. **De-registration** — de-register one person → they now show as
    Unknown, while their old attendance rows remain visible in reports.
 9. **Report and export** — filter by today's date and course, export CSV,
-   open it → rows match the on-screen view.
+   open it → rows match the on-screen view. Set the status filter to
+   Absent, then Present → the table narrows to only those rows, and an
+   export while filtered writes only the shown rows.
 10. **Lighting variation** — repeat test 4 under window light and under
     artificial light, recording both accuracy numbers.
 11. **Absentee marking** — with 3 students enrolled in a course, run a

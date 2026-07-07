@@ -133,7 +133,7 @@ class AttendanceApp(tk.Tk):
         self._build_camera_row(frame).grid(row=4, column=0, columnspan=2, **pad)
 
         self.btn_capture = ttk.Button(
-            frame, text="Register + Capture Faces (webcam)",
+            frame, text="Register + Capture Faces",
             command=self.on_register)
         self.btn_capture.grid(row=5, column=0, columnspan=2, **pad)
         self._camera_buttons.append(self.btn_capture)
@@ -446,6 +446,12 @@ class AttendanceApp(tk.Tk):
         self.var_fcourse = tk.StringVar()
         ttk.Entry(controls, textvariable=self.var_fcourse, width=12).pack(side="left")
 
+        ttk.Label(controls, text="Status:").pack(side="left", padx=4)
+        self.var_fstatus = tk.StringVar(value="All")
+        ttk.Combobox(controls, textvariable=self.var_fstatus, width=8,
+                     state="readonly",
+                     values=("All", "Present", "Absent")).pack(side="left")
+
         ttk.Button(controls, text="Filter",
                    command=self.refresh_attendance).pack(side="left", padx=6)
         ttk.Button(controls, text="Show All",
@@ -467,9 +473,9 @@ class AttendanceApp(tk.Tk):
 
         self.refresh_attendance()
 
-    def _load_rows(self, on_date=None, course=None):
+    def _load_rows(self, on_date=None, course=None, status=None):
         self.tree.delete(*self.tree.get_children())
-        for r in database.get_attendance(on_date, course):
+        for r in database.get_attendance(on_date, course, status):
             status_tag = "absent" if r["status"] == "Absent" else "present"
             self.tree.insert("", tk.END, tags=(status_tag,), values=(
                 r["name"], r["registration_no"], r["session_course"],
@@ -478,10 +484,13 @@ class AttendanceApp(tk.Tk):
     def refresh_attendance(self):
         d = self.var_fdate.get().strip() or None
         c = self.var_fcourse.get().strip() or None
-        self._load_rows(d, c)
+        s = self.var_fstatus.get()
+        s = None if s == "All" else s
+        self._load_rows(d, c, s)
 
     def show_all_attendance(self):
-        self._load_rows(None, None)
+        self.var_fstatus.set("All")
+        self._load_rows(None, None, None)
 
     def on_export(self):
         path = filedialog.asksaveasfilename(
@@ -491,7 +500,9 @@ class AttendanceApp(tk.Tk):
             return
         d = self.var_fdate.get().strip() or None
         c = self.var_fcourse.get().strip() or None
-        n = database.export_attendance_csv(path, d, c)
+        s = self.var_fstatus.get()
+        s = None if s == "All" else s
+        n = database.export_attendance_csv(path, d, c, s)
         messagebox.showinfo("Export complete", f"Exported {n} records to:\n{path}")
 
 
