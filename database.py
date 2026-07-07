@@ -119,23 +119,71 @@ def remove_student_if_no_attendance(student_id):
 
 
 def mark_attendance(student_id, session_course, confidence=None):
-    """Mark a student present. Returns True if newly marked,
-    False if already marked for this course today (duplicate prevention)."""
+    """Mark a student Present for this course today. Returns True if this
+    newly records them Present, False if they were already Present.
+
+    If a row already exists it is because either (a) they were already marked
+    Present today — a genuine duplicate, left untouched — or (b) an earlier
+    session-end sweep marked them Absent and they have now shown up, in which
+    case the record is upgraded Absent -> Present (a late arrival)."""
     now = datetime.now()
     conn = get_connection()
     try:
-        conn.execute(
-            "INSERT INTO attendance (student_id, session_course, date, time, status, confidence) "
-            "VALUES (?, ?, ?, ?, 'Present', ?)",
-            (student_id, session_course, now.date().isoformat(),
-             now.strftime("%H:%M:%S"), confidence),
-        )
-        conn.commit()
-        return True
-    except sqlite3.IntegrityError:
-        return False  # already marked today for this course
+        try:
+            conn.execute(
+                "INSERT INTO attendance (student_id, session_course, date, time, status, confidence) "
+                "VALUES (?, ?, ?, ?, 'Present', ?)",
+                (student_id, session_course, now.date().isoformat(),
+                 now.strftime("%H:%M:%S"), confidence),
+            )
+            conn.commit()
+            return True
+        except sqlite3.IntegrityError:
+            # Upgrade only an Absent row; a duplicate Present stays as-is.
+            cur = conn.execute(
+                "UPDATE attendance SET status = 'Present', time = ?, confidence = ? "
+                "WHERE student_id = ? AND session_course = ? AND date = ? "
+                "AND status = 'Absent'",
+                (now.strftime("%H:%M:%S"), confidence, student_id,
+                 session_course, now.date().isoformat()),
+            )
+            conn.commit()
+            return cur.rowcount > 0
     finally:
         conn.close()
+
+
+def mark_session_absentees(session_course):
+    """Record everyone enrolled in this session's course who was not seen.
+
+    Called when a session ends. For each active student whose registered
+    course matches the session course (case-insensitive, whitespace-trimmed —
+    the same rule as the recognition-time enrollment check), insert an Absent
+    row for today. Students already marked today (Present, or Absent from an
+    earlier sweep) keep their row: the UNIQUE(student_id, session_course, date)
+    constraint turns the insert into a no-op via INSERT OR IGNORE.
+
+    Returns the number of students newly marked absent."""
+    today = date.today().isoformat()
+    now_time = datetime.now().strftime("%H:%M:%S")
+    conn = get_connection()
+    enrolled = conn.execute(
+        "SELECT student_id FROM students WHERE active = 1 "
+        "AND LOWER(TRIM(course)) = LOWER(TRIM(?))",
+        (session_course,),
+    ).fetchall()
+    newly_absent = 0
+    for row in enrolled:
+        cur = conn.execute(
+            "INSERT OR IGNORE INTO attendance "
+            "(student_id, session_course, date, time, status, confidence) "
+            "VALUES (?, ?, ?, ?, 'Absent', NULL)",
+            (row["student_id"], session_course, today, now_time),
+        )
+        newly_absent += cur.rowcount
+    conn.commit()
+    conn.close()
+    return newly_absent
 
 
 def get_attendance(on_date=None, course=None):

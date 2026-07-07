@@ -63,6 +63,12 @@ Operation is split into two phases:
   course per calendar day, enforced by a database UNIQUE constraint.
   Running two sessions for the same course on the same day never
   double-marks anyone.
+- **Absentee marking (by inference)** — when a session ends, every enrolled
+  student (active, and registered for that course) who was never recognized
+  is recorded **Absent** for that course and day. Recognized students stay
+  Present, and a latecomer who appears in a later same-day session for the
+  same course is upgraded from Absent back to Present. The GUI shows a
+  present/absent summary at session end and colours the status column.
 - **Attendance reports** — view attendance filtered by date and/or course
   in the GUI, and export the filtered view to CSV.
 - **De-registration** — removes a student from recognition: the student is
@@ -166,6 +172,8 @@ semester and keep the file.
 | Multiple faces in frame during registration | Only the first face is sampled |
 | Same student, same course, same day | Marked once; silently ignored afterwards |
 | Same student, different course, same day | Marked separately per course — only for the course they are enrolled in |
+| Session ends with enrolled students unseen | Each unseen enrolled student is recorded Absent for that course and day |
+| Latecomer appears in a later same-day session | Their Absent record is upgraded to Present (no duplicate row) |
 | Recognized student, session course ≠ their registered course | Orange "Recognized - not enrolled" box, console log, no attendance row |
 | Session course typed with different casing/spacing (e.g. " cs101 ") | Still matches — comparison is case-insensitive and trimmed |
 | De-registered student appears in a session | Shown as Unknown (excluded from the model after retraining) |
@@ -308,6 +316,11 @@ project report.
    open it → rows match the on-screen view.
 10. **Lighting variation** — repeat test 4 under window light and under
     artificial light, recording both accuracy numbers.
+11. **Absentee marking** — with 3 students enrolled in a course, run a
+    session where only some appear, then press `q` → the session-end summary
+    reports the present/absent split, and the unseen enrolled students show
+    as **Absent** in the report. Re-run the session and let a previously
+    absent student appear → their row flips to Present (no duplicate).
 
 The recognition threshold used in the final system is documented together
 with the measurements above that justify it.

@@ -181,8 +181,15 @@ def run_session(session_course, camera_index=0):
     cap.release()
     cv2.destroyAllWindows()
     log_file.close()
-    print(f"Session ended. {len(marked_this_session)} student(s) recognized.")
+
+    # Attendance is now marked by inference too: everyone enrolled in this
+    # course who was never recognized is recorded Absent for today.
+    absent = database.mark_session_absentees(session_course)
+    present = len(marked_this_session)
+    print(f"Session ended. {present} student(s) recognized and marked present.")
+    print(f"Marked {absent} enrolled student(s) absent for '{session_course}'.")
     print(f"Predictions logged to {PREDICTIONS_LOG}")
+    return {"present": present, "absent": absent}
 
 
 if __name__ == "__main__":
