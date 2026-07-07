@@ -218,3 +218,20 @@ def test_second_sweep_creates_no_duplicates(db):
     assert db.mark_session_absentees("CS101") == 0   # nobody unseen
     assert db.mark_session_absentees("CS101") == 0   # re-run is idempotent
     assert len(db.get_attendance(course="CS101")) == 1
+
+
+def test_get_attendance_filters_by_status(db):
+    """The status filter returns only rows with the requested status; the
+    default (no status) returns both Present and Absent."""
+    a = db.add_student("Alice", "R1", "CS101")
+    db.add_student("Bob", "R2", "CS101")     # unseen -> Absent
+    db.mark_attendance(a, "CS101")           # Alice Present
+    db.mark_session_absentees("CS101")       # Bob Absent
+
+    present = {r["name"] for r in db.get_attendance(status="Present")}
+    absent = {r["name"] for r in db.get_attendance(status="Absent")}
+    everyone = {r["name"] for r in db.get_attendance()}
+
+    assert present == {"Alice"}
+    assert absent == {"Bob"}
+    assert everyone == {"Alice", "Bob"}
