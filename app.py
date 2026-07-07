@@ -425,8 +425,8 @@ class AttendanceApp(tk.Tk):
                 self.after(0, lambda: messagebox.showinfo(
                     "Session ended",
                     f"Session '{course}' ended.\n\n"
-                    f"Present (recognized this session): {summary['present']}\n"
-                    f"Absent (enrolled but not seen): {summary['absent']}"))
+                    f"Present: {summary['present']}\n"
+                    f"Absent: {summary['absent']}"))
 
         threading.Thread(target=work, daemon=True).start()
 
