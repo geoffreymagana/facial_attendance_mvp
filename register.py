@@ -7,10 +7,9 @@ NUM_SAMPLES grayscale face crops saved to data/faces/<student_id>/.
 Press 'q' to abort early.
 """
 
-from pathlib import Path
-
 import cv_engine
 import database
+import paths
 
 NUM_SAMPLES = 30
 FACE_SIZE = (200, 200)
@@ -36,7 +35,7 @@ def detect_cameras(max_devices=5):
 def capture_faces(student_id, num_samples=NUM_SAMPLES, camera_index=0):
     cv2 = cv_engine.require_cv2()
     cascade = cv_engine.face_cascade()
-    out_dir = Path(__file__).parent / "data" / "faces" / str(student_id)
+    out_dir = paths.data_dir() / "faces" / str(student_id)
     out_dir.mkdir(parents=True, exist_ok=True)
 
     cap = cv2.VideoCapture(camera_index)

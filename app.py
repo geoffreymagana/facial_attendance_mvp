@@ -14,10 +14,10 @@ import threading
 import tkinter as tk
 from tkinter import ttk, messagebox, filedialog
 from datetime import date
-from pathlib import Path
 
 import cv_engine
 import database
+import paths
 import register
 import train
 import recognize
@@ -243,7 +243,7 @@ class AttendanceApp(tk.Tk):
                 student_id = database.add_student(name, regno, course)
                 count = register.capture_faces(student_id,
                                                camera_index=camera_index)
-                face_dir = Path(__file__).parent / "data" / "faces" / str(student_id)
+                face_dir = paths.data_dir() / "faces" / str(student_id)
                 if count == 0:
                     # Nothing to train on: cancel instead of saving a ghost
                     # student that the model can never recognize.
@@ -274,7 +274,7 @@ class AttendanceApp(tk.Tk):
                 # Roll back the half-created student only if no face sample
                 # was saved (e.g. webcam unavailable), so the registration
                 # number can be retried.
-                face_dir = Path(__file__).parent / "data" / "faces" / str(student_id)
+                face_dir = paths.data_dir() / "faces" / str(student_id)
                 if student_id is not None and not any(face_dir.glob("*.png")):
                     database.remove_student_if_no_attendance(student_id)
                 self.after(0, lambda: self._register_failed(
@@ -323,7 +323,7 @@ class AttendanceApp(tk.Tk):
             threading.Thread(target=finish, daemon=True).start()
             return
 
-        shutil.rmtree(Path(__file__).parent / "data" / "faces" / str(student_id),
+        shutil.rmtree(paths.data_dir() / "faces" / str(student_id),
                       ignore_errors=True)
         database.remove_student_if_no_attendance(student_id)
         self.lbl_reg_status.config(
@@ -351,7 +351,7 @@ class AttendanceApp(tk.Tk):
         def work():
             try:
                 database.deactivate_student(student["student_id"])
-                face_dir = (Path(__file__).parent / "data" / "faces"
+                face_dir = (paths.data_dir() / "faces"
                             / str(student["student_id"]))
                 shutil.rmtree(face_dir, ignore_errors=True)
                 if self.camera_ready:

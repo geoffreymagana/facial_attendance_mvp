@@ -240,6 +240,111 @@ The underlying scripts also run standalone, which is useful for testing
 and debugging: `python register.py`, `python train.py`,
 `python recognize.py`.
 
+## Packaging as a portable .exe (no Python needed)
+
+The app can be bundled into a single self-contained `AttendanceSystem.exe`
+with PyInstaller, so it runs on a Windows machine that has never had
+Python installed.
+
+Two things make this work correctly:
+
+- **Data location** — `paths.py` detects when the app is running as a
+  frozen exe and puts `data/` (database, face images, model, logs)
+  **next to the .exe** instead of next to the source files. Without this,
+  PyInstaller's onefile mode would write data into the temporary folder
+  the exe unpacks itself into, and every registration would be lost when
+  the app closes. Backup remains "copy the folder".
+- **Prediction logging survives without a console** — every prediction is
+  already appended to `data/predictions_log.csv`, so the windowed
+  (console-less) build loses only the live console echo, not the
+  threshold-tuning evidence.
+
+Build steps (must run **on Windows** — PyInstaller cannot cross-compile.
+The build machine must be able to `import cv2`, so it cannot be a
+Windows "N" edition unless the Media Feature Pack is installed — see
+Troubleshooting):
+
+```powershell
+# Clean venv with only what the app needs (keeps the exe smaller and
+# reduces antivirus false-positive risk). Use Python 3.10-3.12.
+py -3.12 -m venv buildenv
+buildenv\Scripts\python -m pip install -r requirements.txt pyinstaller
+
+# Final build (no console window):
+buildenv\Scripts\pyinstaller --onefile --windowed --name AttendanceSystem `
+    --collect-data cv2 app.py
+
+# Testing/debug build (shows the console with live [predict] lines):
+buildenv\Scripts\pyinstaller --onefile --name AttendanceSystem-console `
+    --collect-data cv2 app.py
+```
+
+The exe appears in `dist\`. `--collect-data cv2` guarantees the Haar
+cascade XML files are bundled even if PyInstaller's OpenCV hook misses
+them.
+
+What to expect (all normal):
+
+- The exe is large (~100 MB) — it contains Python, OpenCV and NumPy.
+- First launch takes a few seconds: onefile self-extracts on every start.
+- **Windows SmartScreen** warns about unsigned exes. Click
+  **More info → Run anyway**. Tell the examiner this upfront — a one-line
+  note pre-announcing it looks professional rather than suspicious.
+
+Acceptance test for the bundle: copy `AttendanceSystem.exe` to a Windows
+machine without Python, run it, register someone, run a session, close
+the app, reopen — the student and attendance records must still be there
+(a `data\` folder appears next to the exe).
+
+### Distributing the exe
+
+Never commit the exe to the repository (binaries don't belong in git and
+regular files are capped at 100 MB). Publish it as a **GitHub Release**
+asset instead — assets can be up to 2 GB and the release gives a stable
+download link.
+
+From the build machine, zip the exe with a short first-run note:
+
+```powershell
+Set-Content dist\README-FIRST.txt @'
+Facial Recognition Class Attendance System
+
+1. Unzip anywhere, then double-click AttendanceSystem.exe.
+2. Windows SmartScreen will warn because the exe is unsigned:
+   click "More info" -> "Run anyway". This is expected.
+3. First launch takes a few seconds while the app unpacks.
+4. All data is stored in a "data" folder created next to the exe.
+'@
+
+Compress-Archive dist\AttendanceSystem.exe, dist\README-FIRST.txt `
+    -DestinationPath dist\AttendanceSystem-v1.0.zip
+
+# Integrity hash to paste into the release notes:
+Get-FileHash dist\AttendanceSystem-v1.0.zip -Algorithm SHA256
+```
+
+Then publish the release (once per version):
+
+```powershell
+gh auth login   # first time only
+gh release create v1.0 dist\AttendanceSystem-v1.0.zip `
+    --title "Attendance System v1.0" `
+    --notes "Portable Windows build - no Python required. Unzip and run AttendanceSystem.exe (SmartScreen: More info -> Run anyway). SHA256: <paste hash>"
+```
+
+(Or via the web UI: repo → Releases → Draft a new release → tag `v1.0` →
+drag the zip into the assets box → Publish.)
+
+The permanent download link is then:
+
+```text
+https://github.com/geoffreymagana/facial_attendance_mvp/releases/latest
+```
+
+The same zip can also be uploaded to any other hosting page. If the tuned
+`THRESHOLD` changes after further testing, rebuild and publish `v1.1` —
+the `latest` link follows automatically.
+
 ## Project structure
 
 ```text
@@ -342,6 +447,10 @@ with the measurements above that justify it.
   usually a missing Microsoft Visual C++ redistributable; install it (or
   reinstall `opencv-contrib-python`), then click **Retry camera engine**.
   The rest of the app (viewing and exporting attendance) works meanwhile.
+  On Windows **N editions** (e.g. "Windows 11 Pro N") the cause is the
+  missing Media Foundation libraries (`mfplat.dll` etc.) instead: install
+  the **Media Feature Pack** (Settings → System → Optional features →
+  Add a feature → "Media Feature Pack"), reboot, and retry.
 - **Poor recognition** — recapture samples in better lighting and make
   sure the face fills a good portion of the frame during registration.
 - **Camera window frozen on Linux** — install `opencv-contrib-python`

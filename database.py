@@ -7,9 +7,10 @@ trained LBPH model maps directly to student_id labels.
 
 import sqlite3
 from datetime import datetime, date
-from pathlib import Path
 
-DB_PATH = Path(__file__).parent / "data" / "attendance.db"
+import paths
+
+DB_PATH = paths.data_dir() / "attendance.db"
 
 
 def get_connection():
