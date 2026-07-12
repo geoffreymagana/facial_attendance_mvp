@@ -6,11 +6,11 @@ Run this after every new registration.
 """
 
 import numpy as np
-from pathlib import Path
 
 import cv_engine
+import paths
 
-DATA_DIR = Path(__file__).parent / "data"
+DATA_DIR = paths.data_dir()
 FACES_DIR = DATA_DIR / "faces"
 MODEL_PATH = DATA_DIR / "lbph_model.yml"
 

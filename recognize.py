@@ -18,12 +18,13 @@ from pathlib import Path
 
 import cv_engine
 import database
+import paths
 
 THRESHOLD = 65.0  # tune this during testing (evaluate.py suggests a value)
 DUPLICATE_THRESHOLD = 55.0  # stricter: same-face matches are strong
 FACE_SIZE = (200, 200)
-MODEL_PATH = Path(__file__).parent / "data" / "lbph_model.yml"
-PREDICTIONS_LOG = Path(__file__).parent / "data" / "predictions_log.csv"
+MODEL_PATH = paths.data_dir() / "lbph_model.yml"
+PREDICTIONS_LOG = paths.data_dir() / "predictions_log.csv"
 
 
 def preprocess(gray_face):

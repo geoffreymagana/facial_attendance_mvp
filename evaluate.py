@@ -22,16 +22,15 @@ Usage:
 
 import csv
 from datetime import datetime
-from pathlib import Path
-
 import cv2
 import numpy as np
 
 import database
+import paths
 import recognize
 import train
 
-LOG_PATH = Path(__file__).parent / "data" / "evaluation_log.csv"
+LOG_PATH = paths.data_dir() / "evaluation_log.csv"
 TEST_FRACTION = 0.2  # hold out the last 20% of each student's samples
 
 
