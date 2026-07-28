@@ -246,6 +246,11 @@ The app can be bundled into a single self-contained `AttendanceSystem.exe`
 with PyInstaller, so it runs on a Windows machine that has never had
 Python installed.
 
+Important: the build machine must have a working OpenCV runtime and the
+correct Windows media dependencies. If the builder's machine is Windows N
+and lacks the Media Feature Pack, the resulting exe may be invalid even if
+it is later copied to a machine with the Media Feature Pack.
+
 Two things make this work correctly:
 
 - **Data location** — `paths.py` detects when the app is running as a
@@ -262,7 +267,11 @@ Two things make this work correctly:
 Build steps (must run **on Windows** — PyInstaller cannot cross-compile.
 The build machine must be able to `import cv2`, so it cannot be a
 Windows "N" edition unless the Media Feature Pack is installed — see
-Troubleshooting):
+Troubleshooting).
+
+If the builder's machine does not satisfy these requirements, the exe
+produced may be invalid even on another machine that does have the media
+feature pack.
 
 ```powershell
 # Clean venv with only what the app needs (keeps the exe smaller and
@@ -282,6 +291,88 @@ buildenv\Scripts\pyinstaller --onefile --name AttendanceSystem-console `
 The exe appears in `dist\`. `--collect-data cv2` guarantees the Haar
 cascade XML files are bundled even if PyInstaller's OpenCV hook misses
 them.
+
+### Release bundle with existing trained data
+
+If you want to publish a zip that already includes a trained model and
+face samples, the builder must do this on a machine where `cv2` imports
+correctly and the camera works. Building on a Windows N machine without
+the Media Feature Pack can still produce a broken exe, even if the zip is
+later copied to a machine that has the feature pack.
+
+The repository includes `build_release.ps1` and `release_bundle.py` to
+help builders create a correct release bundle. The recommended workflow
+is:
+
+```powershell
+# Clone the repo and run the build helper on a healthy build machine.
+git clone https://github.com/geoffreymagana/facial_attendance_mvp.git
+cd facial_attendance_mvp
+.\build_release.ps1
+```
+
+This command automatically:
+- creates or reuses `buildenv`
+- installs dependencies
+- verifies that `cv2` imports correctly
+- builds `dist\AttendanceSystem.exe`
+- bundles the exe with `data\` into a ZIP
+
+If you already have a full `data/` folder with a trained model and want
+to package that specific folder:
+
+```powershell
+.\build_release.ps1 -DataDir 'C:\path\to\full\data'
+```
+
+If you already built the exe and only need to package it:
+
+```powershell
+.\release_bundle.py --exe dist/AttendanceSystem.exe --data data --output AttendanceSystem-bundle.zip
+```
+
+This creates a zip containing:
+- `AttendanceSystem.exe`
+- the specified `data/` folder with `attendance.db`, `lbph_model.yml`,
+  and any captured face samples
+- `README-FIRST.txt`
+
+The recipient must unzip the archive so that `AttendanceSystem.exe` and
+`data\` are side by side.
+
+## Recipient rebuild checklist
+
+If you receive an uploaded artifact built on a machine without Media
+Feature Pack, do not rely on that artifact. Instead rebuild from source
+on a machine with the correct Windows media support.
+
+Use this exact sequence:
+
+```powershell
+git clone https://github.com/geoffreymagana/facial_attendance_mvp.git
+cd facial_attendance_mvp
+.\build_release.ps1
+```
+
+If you need to include an already-trained data folder:
+
+```powershell
+.\build_release.ps1 -DataDir 'C:\path\to\full\data'
+```
+
+Then distribute the generated zip. The end user should unzip it so
+`AttendanceSystem.exe` and `data\` are in the same folder.
+
+`data\` are side by side.
+
+That creates a portable zip containing:
+- `AttendanceSystem.exe`
+- the specified `data/` folder with `attendance.db`, `lbph_model.yml`,
+  and any captured face samples
+- `README-FIRST.txt`
+
+The target user should unzip the archive so `AttendanceSystem.exe` and
+`data/` sit next to each other.
 
 What to expect (all normal):
 
