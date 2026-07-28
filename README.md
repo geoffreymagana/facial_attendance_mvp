@@ -442,6 +442,11 @@ with the measurements above that justify it.
   connected, then click Detect cameras again.
 - **`cv2.face` AttributeError** — plain opencv-python is installed instead
   of opencv-contrib-python; see Setup.
+- **`module 'cv2' has no attribute 'CascadeClassifier'`** — the cv2 package
+  was imported, but it does not expose the OpenCV API. This can happen if a
+  broken OpenCV wheel was installed, the wrong `cv2` binary is being imported,
+  or PyInstaller bundled an incomplete OpenCV package.
+  Reinstall `opencv-contrib-python`, then rebuild with `--collect-data cv2`.
 - **"Camera engine unavailable" banner / `DLL load failed while importing
   cv2`** — the OpenCV native libraries could not load. On Windows this is
   usually a missing Microsoft Visual C++ redistributable; install it (or
